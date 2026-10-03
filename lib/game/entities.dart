@@ -10,10 +10,13 @@ class Vijand {
   double _afstand; // afgelegde afstand langs het pad (in cellen)
   double hp;
   double vertragingTijd = 0; // ijs-effect: x seconden op halve snelheid
+  double fase = 0; // loop-animatiefase (hop-beweging in de painter)
   bool dood = false;
   bool ontsnapt = false;
 
-  Vijand(this.type, this.stats, double startAfstand) : _afstand = startAfstand, hp = stats.hp.toDouble();
+  Vijand(this.type, this.stats, double startAfstand)
+      : _afstand = startAfstand,
+        hp = stats.hp.toDouble();
 
   double get afstand => _afstand;
   double get hpMax => stats.hp.toDouble();
@@ -35,6 +38,7 @@ class Vijand {
     final factor = vertragingTijd > 0 ? 0.45 : 1.0;
     if (vertragingTijd > 0) vertragingTijd -= dt;
     _afstand += stats.snelheid * factor * dt;
+    fase += dt * 9 * factor; // sneller lopen = sneller huppelen
   }
 }
 
@@ -81,7 +85,23 @@ class Toren {
   double vuurCooldown = 0;
   int totaalGeinvesteerd;
 
-  Toren(this.type, this.x, this.y) : totaalGeinvesteerd = TorenStats.van(type, 1).basisKosten;
+  /// Loop-richting (radialen) naar het laatstbeschoten doel — voor een
+  /// draaiend kanonloopje in de painter. Start omlaag-rechts.
+  double loopRichting = 0.8;
+
+  /// Knipoog-effect bij schot (0..1, dooft uit).
+  double schietFlits = 0;
+
+  /// Vriendje-animatietijd (draaiende decoraties e.d.).
+  double animTijd = 0;
+
+  void voorLoop(double dt) {
+    animTijd += dt;
+    if (schietFlits > 0) schietFlits = schietFlits; // dooft uit in game_state
+  }
+
+  Toren(this.type, this.x, this.y)
+      : totaalGeinvesteerd = TorenStats.van(type, 1).basisKosten;
 
   TorenStats get stats => TorenStats.van(type, level);
 
@@ -105,6 +125,10 @@ class Projectiel {
   double y;
   bool weg = false;
 
+  /// Vorige positie — voor een streepje/sliert tekenen.
+  double vorigeX;
+  double vorigeY;
+
   Projectiel({
     required this.type,
     required this.doel,
@@ -113,7 +137,8 @@ class Projectiel {
     required this.vertragingPerTref,
     required this.x,
     required this.y,
-  });
+  })  : vorigeX = x,
+        vorigeY = y;
 
   void update(double dt) {
     if (weg || doel.isDood) {
@@ -132,6 +157,8 @@ class Projectiel {
       return;
     }
     final stap = snelheid * dt;
+    vorigeX = x;
+    vorigeY = y;
     x += dx / d * stap;
     y += dy / d * stap;
   }

@@ -133,11 +133,17 @@ class GameState {
 
       // Torens schieten.
       for (final t in torens) {
+        // Schietflits dooft uit, ook zonder doel.
+        if (t.schietFlits > 0) t.schietFlits -= dt * 4;
+        t.voorLoop(dt);
         t.vuurCooldown -= dt;
         if (t.vuurCooldown <= 0) {
           final stats = t.stats;
           final doel = _zoekDoel(t);
           if (doel != null) {
+            final (vx, vy) = positieOpPad(doel.afstand);
+            t.loopRichting = math.atan2(vy - t.y, vx - t.x);
+            t.schietFlits = 1;
             projectielen.add(Projectiel(
               type: t.type,
               doel: doel,

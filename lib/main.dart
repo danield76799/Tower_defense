@@ -183,26 +183,94 @@ class _GameScreenState extends State<GameScreen>
     );
   }
 
+  // ---- CoC-stijl: hout/goud paneel-decoraties ----
+  BoxDecoration get _houtBalk => BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [const Color(0xFF8D6E63), const Color(0xFF6D4C41)],
+        ),
+        border: Border(
+          top: BorderSide(color: const Color(0xFFFFD54F), width: 2.5),
+          bottom: BorderSide(color: Colors.black.withValues(alpha: 0.4), width: 1),
+        ),
+        boxShadow: const [
+          BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 2)),
+        ],
+      );
+
+  BoxDecoration get _goudChip => BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFFFD54F), Color(0xFFF9A825)],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFF8D6E63), width: 2),
+        boxShadow: const [
+          BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(0, 1.5)),
+        ],
+      );
+
   Widget _buildTopBar() {
     final st = _state;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: Colors.black54,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF795548), Color(0xFF5D4037)],
+        ),
+        border: Border(
+          bottom: BorderSide(color: const Color(0xFFFFD54F), width: 2.5),
+        ),
+      ),
       child: Row(
         children: [
-          const Icon(Icons.favorite, color: Colors.redAccent, size: 19),
-          Text(' ${st.levens}',
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-          const SizedBox(width: 18),
-          const Icon(Icons.monetization_on, color: Colors.amber, size: 19),
-          Text(' ${st.geld}',
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          // Levens: hart in goud-chip.
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: _goudChip.copyWith(
+              gradient: const LinearGradient(
+                colors: [Color(0xFFFF8A80), Color(0xFFE53935)],
+              ),
+              border: Border.all(color: const Color(0xFF5D4037), width: 2),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.favorite, color: Colors.white, size: 17),
+                Text(' ${st.levens}',
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Geld: munt-chip.
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: _goudChip,
+            child: Row(
+              children: [
+                const Icon(Icons.monetization_on,
+                    color: Color(0xFF5D4037), size: 17),
+                Text(' ${st.geld}',
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF4E342E))),
+              ],
+            ),
+          ),
           const Spacer(),
-          Text('${GameBalance.totaalGolven} golven',
-              style: const TextStyle(fontSize: 13, color: Colors.white70)),
-          const SizedBox(width: 14),
           Text('Golf ${st.golfNummer}/${GameBalance.totaalGolven}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFFFFD54F))),
           const SizedBox(width: 10),
           _statusChip(st.status),
         ],
@@ -237,7 +305,7 @@ class _GameScreenState extends State<GameScreen>
             : null;
 
     return Container(
-      color: Colors.black45,
+      decoration: _houtBalk,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -296,28 +364,41 @@ class _GameScreenState extends State<GameScreen>
         width: 84,
         padding: const EdgeInsets.symmetric(vertical: 6),
         decoration: BoxDecoration(
-          color: gekozen
-              ? Theme.of(context).colorScheme.primaryContainer
-              : betaalbaar
-                  ? Colors.black38
-                  : Colors.black26,
-          borderRadius: BorderRadius.circular(11),
+          borderRadius: BorderRadius.circular(12),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: gekozen
+                ? [const Color(0xFFFFD54F), const Color(0xFFF9A825)]
+                : betaalbaar
+                    ? [const Color(0xFF8D6E63), const Color(0xFF5D4037)]
+                    : [const Color(0xFF616161), const Color(0xFF424242)],
+          ),
           border: Border.all(
             color: gekozen
                 ? Colors.white
-                : (betaalbaar ? Colors.white24 : Colors.red.shade700),
-            width: gekozen ? 2 : 1,
+                : (betaalbaar ? const Color(0xFFFFD54F) : Colors.red.shade700),
+            width: gekozen ? 2.5 : 1.6,
           ),
+          boxShadow: const [
+            BoxShadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 2)),
+          ],
         ),
         child: Column(
           children: [
             Text(emoji, style: const TextStyle(fontSize: 21)),
-            Text('$kosten',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: betaalbaar ? Colors.amber.shade200 : Colors.red.shade200,
-                )),
+            Text(
+              '$kosten',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                color: gekozen
+                    ? const Color(0xFF4E342E)
+                    : betaalbaar
+                        ? const Color(0xFFFFD54F)
+                        : Colors.red.shade200,
+              ),
+            ),
           ],
         ),
       ),
