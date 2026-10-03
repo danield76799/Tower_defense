@@ -6,12 +6,12 @@ import 'entities.dart';
 import 'game_config.dart';
 import 'game_state.dart';
 
-/// Tekent het veld in Clash of Clans-cartoonstijl:
-/// - helder gras met checkerboard-textuur, bosjes en bloemetjes
-/// - pad als zandbaan met donkere rand en steentjes
-/// - torens als gebouwtjes met schaduw, draaiend loopje, schietflits en sterren
-/// - vijanden als poppetjes met gezichtjes, hoppeltje, schaduw en HP-balkje
-/// - projectielen met bewegingssliert en glans
+/// Tekent het veld in Bloons TD-cartoonstijl:
+/// - gras + zandpad (zoals eerder)
+/// - bloons als glanzende ballonnen met lagen (zebra/regenboog/keramiek apart)
+/// - MOAB als blimp met vinnen + HP-balk
+/// - torens als monkeys met type-hoofdband (dart/tack/ijs/gif/bom/sniper/bliksem)
+/// - projectielen: darts, spijkers, bommen, zigzag-bliksem
 class GamePainter extends CustomPainter {
   final GameState state;
   final (double, double)? hoverCel;
@@ -26,6 +26,11 @@ class GamePainter extends CustomPainter {
     _rng.nextDouble(),
   ));
 
+  static const _regenboogKleuren = [
+    Color(0xFFE53935), Color(0xFFFB8C00), Color(0xFFFDD835),
+    Color(0xFF43A047), Color(0xFF1E88E5), Color(0xFF8E24AA),
+  ];
+
   @override
   void paint(Canvas canvas, Size size) {
     final cw = size.width / GameState.kolommen;
@@ -39,7 +44,6 @@ class GamePainter extends CustomPainter {
       _tekenToren(canvas, t, cw, ch);
     }
 
-    // Plaatsing-preview (ghost Staat 'onder' de actie).
     if (state.geselecteerdeToren == null &&
         state.tePlaatsenType != null &&
         hoverCel != null) {
@@ -51,7 +55,7 @@ class GamePainter extends CustomPainter {
     }
 
     for (final v in state.vijanden) {
-      _tekenVijand(canvas, v, cw, ch);
+      _tekenBloon(canvas, v, cw, ch);
     }
   }
 
@@ -244,27 +248,17 @@ class GamePainter extends CustomPainter {
       );
     }
 
-    final kleur = switch (t.type) {
-      TorenType.kanon => const Color(0xFFB85C4A),
+    final bandKleur = switch (t.type) {
+      TorenType.dart => const Color(0xFFB85C4A),
+      TorenType.tack => const Color(0xFFFF7043),
       TorenType.ijs => const Color(0xFF4FA3D1),
+      TorenType.gif => const Color(0xFF7CB342),
+      TorenType.bom => const Color(0xFF37474F),
       TorenType.sniper => const Color(0xFF8B6BC7),
       TorenType.bliksem => const Color(0xFFFFD600),
-      TorenType.gif => const Color(0xFF7CB342),
     };
-    final donker = switch (t.type) {
-      TorenType.kanon => const Color(0xFF8A4234),
-      TorenType.ijs => const Color(0xFF3B7FA6),
-      TorenType.sniper => const Color(0xFF6A4F9E),
-      TorenType.bliksem => const Color(0xFFC7A600),
-      TorenType.gif => const Color(0xFF558B2F),
-    };
-    final licht = switch (t.type) {
-      TorenType.kanon => const Color(0xFFD9826C),
-      TorenType.ijs => const Color(0xFF7EC3E6),
-      TorenType.sniper => const Color(0xFFAF8FE0),
-      TorenType.bliksem => const Color(0xFFFFF176),
-      TorenType.gif => const Color(0xFFAED581),
-    };
+    const donker = Color(0xFF5D4037);
+    const licht = Color(0xFF8D6E63);
 
     // Grondschaduw.
     canvas.drawOval(
@@ -288,15 +282,42 @@ class GamePainter extends CustomPainter {
     );
     canvas.drawRRect(
       RRect.fromRectAndRadius(basis.deflate(2.4), const Radius.circular(4)),
-      Paint()..color = kleur,
+      Paint()..color = licht,
     );
 
-    // Geschutstoren.
+    // Monkey-kopje.
     final torenR = cw * 0.3;
     final torenCx = cx;
     final torenCy = cy - ch * 0.05;
     canvas.drawCircle(Offset(torenCx, torenCy), torenR, Paint()..color = donker);
-    canvas.drawCircle(Offset(torenCx, torenCy), torenR - 2.4, Paint()..color = kleur);
+    canvas.drawCircle(Offset(torenCx, torenCy), torenR - 2.4, Paint()..color = licht);
+    // Beige bek-strook.
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(torenCx, torenCy + torenR * 0.42),
+        width: torenR * 0.95,
+        height: torenR * 0.55,
+      ),
+      Paint()..color = const Color(0xFFD7CCC8),
+    );
+    // Oogjes.
+    canvas.drawCircle(Offset(torenCx - torenR * 0.32, torenCy - torenR * 0.15),
+        torenR * 0.13, Paint()..color = Colors.white);
+    canvas.drawCircle(Offset(torenCx + torenR * 0.32, torenCy - torenR * 0.15),
+        torenR * 0.13, Paint()..color = Colors.white);
+    canvas.drawCircle(Offset(torenCx - torenR * 0.32, torenCy - torenR * 0.15),
+        torenR * 0.06, Paint()..color = Colors.black);
+    canvas.drawCircle(Offset(torenCx + torenR * 0.32, torenCy - torenR * 0.15),
+        torenR * 0.06, Paint()..color = Colors.black);
+    // Hoofdband in type-kleur.
+    canvas.drawCircle(
+      Offset(torenCx, torenCy),
+      torenR + 1,
+      Paint()
+        ..color = bandKleur
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.4,
+    );
 
     // Draaiend loopje.
     final richting = t.loopRichting;
@@ -336,7 +357,7 @@ class GamePainter extends CustomPainter {
           );
         }
       case TorenType.gif:
-        // Braakbol met bobbeltjes.
+        // Gifkolf met bobbeltjes.
         canvas.drawCircle(
           Offset(torenCx, torenCy - 2),
           torenR * 0.42,
@@ -349,6 +370,29 @@ class GamePainter extends CustomPainter {
             Paint()..color = const Color(0xFF558B2F),
           );
         }
+      case TorenType.tack:
+        // 8 spijkerstompen in een cirkel.
+        for (var i = 0; i < 8; i++) {
+          final hoek = i * math.pi / 4 + t.animTijd * 0.3;
+          canvas.drawLine(
+            Offset(torenCx + math.cos(hoek) * torenR * 0.6,
+                torenCy + math.sin(hoek) * torenR * 0.6),
+            Offset(torenCx + math.cos(hoek) * torenR * 1.0,
+                torenCy + math.sin(hoek) * torenR * 1.0),
+            Paint()
+              ..color = const Color(0xFFFF8A65)
+              ..strokeWidth = 2.6
+              ..strokeCap = StrokeCap.round,
+          );
+        }
+      case TorenType.bom:
+        // Zwarte bom-bal.
+        canvas.drawCircle(Offset(loopX, loopY), cw * 0.13, Paint()..color = const Color(0xFF263238));
+        canvas.drawCircle(
+          Offset(loopX - cw * 0.04, loopY - cw * 0.04),
+          cw * 0.04,
+          Paint()..color = Colors.white.withValues(alpha: 0.5),
+        );
       default:
         canvas.drawLine(
           Offset(torenCx, torenCy),
@@ -362,7 +406,7 @@ class GamePainter extends CustomPainter {
           Offset(torenCx, torenCy),
           Offset(loopX, loopY),
           Paint()
-            ..color = licht
+            ..color = bandKleur
             ..strokeWidth = loopDikte
             ..strokeCap = StrokeCap.round,
         );
@@ -462,41 +506,81 @@ class GamePainter extends CustomPainter {
   void _tekenProjectiel(Canvas canvas, Projectiel p, double cw, double ch) {
     final px = p.x * cw;
     final py = p.y * ch;
-    final kleur = switch (p.type) {
-      TorenType.kanon => const Color(0xFFFFCA28),
-      TorenType.ijs => const Color(0xFF4DD0E1),
-      TorenType.sniper => const Color(0xFFB388FF),
-      TorenType.bliksem => const Color(0xFFFFFF00),
-      TorenType.gif => const Color(0xFF8BC34A),
-    };
+    final sx = p.vorigeX * cw;
+    final sy = p.vorigeY * ch;
 
-    // Bewegingssliert.
-    canvas.drawLine(
-      Offset(p.vorigeX * cw, p.vorigeY * ch),
-      Offset(px, py),
-      Paint()
-        ..color = kleur.withValues(alpha: 0.4)
-        ..strokeWidth = cw * 0.06
-        ..strokeCap = StrokeCap.round,
-    );
-
-    canvas.drawCircle(Offset(px, py), cw * 0.1, Paint()..color = kleur);
-    canvas.drawCircle(
-      Offset(px - cw * 0.03, py - cw * 0.03),
-      cw * 0.035,
-      Paint()..color = Colors.white.withValues(alpha: 0.85),
-    );
+    switch (p.type) {
+      case TorenType.dart:
+        const kleur = Color(0xFFE65100);
+        canvas.drawLine(
+          Offset(sx, sy),
+          Offset(px, py),
+          Paint()
+            ..color = kleur
+            ..strokeWidth = cw * 0.07
+            ..strokeCap = StrokeCap.round,
+        );
+        canvas.drawCircle(Offset(px, py), cw * 0.055, Paint()..color = kleur);
+      case TorenType.tack:
+        canvas.drawLine(
+          Offset(sx, sy),
+          Offset(px, py),
+          Paint()
+            ..color = const Color(0xFFFF8A65)
+            ..strokeWidth = cw * 0.05
+            ..strokeCap = StrokeCap.round,
+        );
+      case TorenType.bom:
+        canvas.drawCircle(Offset(px, py), cw * 0.11, Paint()..color = const Color(0xFF263238));
+        canvas.drawCircle(
+          Offset(px - cw * 0.035, py - cw * 0.035),
+          cw * 0.035,
+          Paint()..color = Colors.white.withValues(alpha: 0.55),
+        );
+      case TorenType.gif:
+        canvas.drawCircle(Offset(px, py), cw * 0.09, Paint()..color = const Color(0xFF8BC34A));
+        canvas.drawCircle(
+          Offset(px - cw * 0.03, py - cw * 0.03),
+          cw * 0.03,
+          Paint()..color = Colors.white.withValues(alpha: 0.8),
+        );
+      case TorenType.bliksem:
+        final zigzag = Path()
+          ..moveTo(sx, sy)
+          ..lineTo(sx + (px - sx) * 0.3, sy + (py - sy) * 0.3 - cw * 0.08)
+          ..lineTo(sx + (px - sx) * 0.6, sy + (py - sy) * 0.6 + cw * 0.08)
+          ..lineTo(px, py);
+        canvas.drawPath(
+          zigzag,
+          Paint()
+            ..color = Colors.yellowAccent
+            ..strokeWidth = cw * 0.05
+            ..style = PaintingStyle.stroke,
+        );
+      default:
+        canvas.drawLine(
+          Offset(sx, sy),
+          Offset(px, py),
+          Paint()
+            ..color = const Color(0xFFB388FF)
+            ..strokeWidth = cw * 0.04
+            ..strokeCap = StrokeCap.round,
+        );
+        canvas.drawCircle(Offset(px, py), cw * 0.04, Paint()..color = const Color(0xFFB388FF));
+    }
   }
 
-  // ---------------- vijand ----------------
-  void _tekenVijand(Canvas canvas, Vijand v, double cw, double ch) {
+  // ---------------- bloon ----------------
+  void _tekenBloon(Canvas canvas, Vijand v, double cw, double ch) {
     final (px, py) = positieOpPad(state.pad, v.afstand);
     final cx = px * cw;
     final cy = py * ch;
+    final st = v.stats;
 
-    // Hoppeltje.
-    final hop = math.sin(v.fase * math.pi).abs() * ch * 0.06;
-    final cy2 = cy - hop;
+    if (st.stijl == BloonStijl.moab) {
+      _tekenMoab(canvas, v, cx, cy, cw, ch);
+      return;
+    }
 
     // Grondschaduw.
     canvas.drawOval(
@@ -508,12 +592,28 @@ class GamePainter extends CustomPainter {
       Paint()..color = Colors.black.withValues(alpha: 0.3),
     );
 
-    final hoofdR = switch (v.type) {
-      VijandType.tank => cw * 0.3,
-      VijandType.normaal => cw * 0.24,
-      VijandType.snel => cw * 0.19,
-      VijandType.boss => cw * 0.44,
-    };
+    // Hoppeltje.
+    final hop = math.sin(v.fase * math.pi).abs() * ch * 0.06;
+    final cy2 = cy - hop;
+
+    final hoofdR = cw *
+        switch (st.stijl) {
+          BloonStijl.regenboog || BloonStijl.zebra => 0.3,
+          _ => 0.26,
+        };
+
+    // Gif-bellen.
+    if (v.gifTijd > 0) {
+      for (var i = 0; i < 2; i++) {
+        final bubbelH = (v.fase * 0.25 + i * 0.5) % 1.0;
+        canvas.drawCircle(
+          Offset(cx + (i == 0 ? -hoofdR * 0.5 : hoofdR * 0.4),
+              cy2 - bubbelH * hoofdR * 1.6),
+          2.0 + i,
+          Paint()..color = const Color(0xFF8BC34A).withValues(alpha: 0.6 - bubbelH * 0.4),
+        );
+      }
+    }
 
     // Ijs-halo.
     if (v.vertragingTijd > 0) {
@@ -526,161 +626,153 @@ class GamePainter extends CustomPainter {
       }
     }
 
-    // Gif-bellen (drijven op met een vaste tijd-basis zodat ze niet flikkeren).
-    if (v.gifTijd > 0) {
-      for (var i = 0; i < 2; i++) {
-        final bubbelH = (v.fase * 0.25 + i * 0.5) % 1.0;
+    // Ballon-lichaam per stijl.
+    if (st.stijl == BloonStijl.regenboog) {
+      // Concentrische regenboog-ringen.
+      var idx = 0;
+      for (var i = _regenboogKleuren.length - 1; i >= 0; i--) {
+        idx++;
         canvas.drawCircle(
-          Offset(cx + (i == 0 ? -hoofdR * 0.5 : hoofdR * 0.4), cy2 - bubbelH * hoofdR * 1.6),
-          2.0 + i,
-          Paint()..color = const Color(0xFF8BC34A).withValues(alpha: 0.6 - bubbelH * 0.4),
+          Offset(cx, cy2),
+          hoofdR * (idx / _regenboogKleuren.length),
+          Paint()..color = _regenboogKleuren[i],
         );
+      }
+      canvas.drawCircle(
+        Offset(cx, cy2),
+        hoofdR,
+        Paint()
+          ..color = Colors.black.withValues(alpha: 0.25)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.4,
+      );
+    } else if (st.stijl == BloonStijl.zebra) {
+      canvas.drawCircle(Offset(cx, cy2), hoofdR, Paint()..color = const Color(0xFF212121));
+      canvas.save();
+      canvas.clipPath(Path()
+        ..addOval(Rect.fromCircle(center: Offset(cx, cy2), radius: hoofdR)));
+      final wit = Paint()..color = Colors.white;
+      for (var i = -1; i <= 1; i++) {
+        canvas.drawRect(
+          Rect.fromLTWH(cx - hoofdR + (i + 1.5) * hoofdR * 0.66, cy2 - hoofdR,
+              hoofdR * 0.3, hoofdR * 2),
+          wit,
+        );
+      }
+      canvas.restore();
+    } else {
+      canvas.drawCircle(Offset(cx, cy2), hoofdR, Paint()..color = st.kleur);
+      canvas.drawCircle(
+        Offset(cx, cy2),
+        hoofdR,
+        Paint()
+          ..color = Colors.black.withValues(alpha: 0.25)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+      );
+      canvas.drawCircle(
+        Offset(cx - hoofdR * 0.32, cy2 - hoofdR * 0.34),
+        hoofdR * 0.22,
+        Paint()..color = Colors.white.withValues(alpha: 0.45),
+      );
+    }
+
+    // Keramiek: barstjes bij HP-verlies.
+    if (v.type == BloonType.keramiek) {
+      final frac = (v.hp / v.hpMax).clamp(0.0, 1.0);
+      if (frac < 0.99) {
+        final barst = Paint()
+          ..color = Colors.white70
+          ..strokeWidth = 1.3
+          ..style = PaintingStyle.stroke;
+        canvas.drawLine(Offset(cx - hoofdR * 0.5, cy2 - hoofdR * 0.3),
+            Offset(cx - hoofdR * 0.1, cy2 + hoofdR * 0.1), barst);
+        if (frac < 0.6) {
+          canvas.drawLine(Offset(cx + hoofdR * 0.2, cy2 - hoofdR * 0.5),
+              Offset(cx + hoofdR * 0.55, cy2 + hoofdR * 0.05), barst);
+        }
+        if (frac < 0.3) {
+          canvas.drawLine(Offset(cx - hoofdR * 0.3, cy2 + hoofdR * 0.4),
+              Offset(cx + hoofdR * 0.3, cy2 + hoofdR * 0.55), barst);
+        }
       }
     }
 
-    final lichaam = switch (v.type) {
-      VijandType.normaal => const Color(0xFFD84343),
-      VijandType.snel => const Color(0xFFF5B93C),
-      VijandType.tank => const Color(0xFF7E57C2),
-      VijandType.boss => const Color(0xFF2B2B2B),
-    };
-    final lichaamDonker = switch (v.type) {
-      VijandType.normaal => const Color(0xFFA63333),
-      VijandType.snel => const Color(0xFFC08A28),
-      VijandType.tank => const Color(0xFF5E4099),
-      VijandType.boss => const Color(0xFF171717),
-    };
-
-    if (v.type == VijandType.tank) {
-      // Hoekig pantser.
-      final romp = RRect.fromRectAndRadius(
-        Rect.fromCenter(
-          center: Offset(cx, cy2),
-          width: hoofdR * 1.9,
-          height: hoofdR * 1.5,
-        ),
-        const Radius.circular(6),
-      );
-      canvas.drawRRect(romp, Paint()..color = lichaamDonker);
-      canvas.drawRRect(romp.deflate(2), Paint()..color = lichaam);
+    // HP-balkje alleen bij meerlagige bloons.
+    if (st.hp > 1) {
+      final hpFrac = (v.hp / v.hpMax).clamp(0.0, 1.0);
+      final balkBreedte = hoofdR * 2.2;
+      final balkY = cy2 - hoofdR - ch * 0.14;
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromCenter(
-            center: Offset(cx, cy2 - hoofdR * 0.25),
-            width: hoofdR * 1.2,
-            height: hoofdR * 0.6,
+          Rect.fromCenter(center: Offset(cx, balkY), width: balkBreedte, height: 4),
+          const Radius.circular(2),
+        ),
+        Paint()..color = Colors.black.withValues(alpha: 0.55),
+      );
+      final hpKleur =
+          hpFrac > 0.5 ? Colors.green : (hpFrac > 0.25 ? Colors.orange : Colors.red);
+      if (hpFrac > 0) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromCenter(
+              center: Offset(cx - balkBreedte / 2 + balkBreedte * hpFrac / 2, balkY),
+              width: (balkBreedte - 1) * hpFrac,
+              height: 3,
+            ),
+            const Radius.circular(1.5),
           ),
-          const Radius.circular(4),
-        ),
-        Paint()..color = lichaamDonker,
-      );
-    } else if (v.type == VijandType.boss) {
-      // Boss: grote gepantserde romp met spijkers + rode kroon.
-      final romp = RRect.fromRectAndRadius(
-        Rect.fromCenter(
-          center: Offset(cx, cy2),
-          width: hoofdR * 1.7,
-          height: hoofdR * 1.55,
-        ),
-        const Radius.circular(9),
-      );
-      canvas.drawRRect(romp, Paint()..color = lichaamDonker);
-      canvas.drawRRect(romp.deflate(2.6), Paint()..color = lichaam);
-      // Spijker-platen.
-      for (var i = 0; i < 4; i++) {
-        final spx = cx + (i % 2 == 0 ? -1.0 : 1.0) * hoofdR * 0.45;
-        final spy = cy2 + (i < 2 ? -1.0 : 1.0) * hoofdR * 0.4;
-        canvas.drawCircle(Offset(spx, spy), hoofdR * 0.1, Paint()..color = const Color(0xFF757575));
-      }
-      // Rode ogen (kwade blik).
-      canvas.drawCircle(Offset(cx - hoofdR * 0.26, cy2 - hoofdR * 0.1), hoofdR * 0.13,
-          Paint()..color = const Color(0xFFFF5252));
-      canvas.drawCircle(Offset(cx + hoofdR * 0.26, cy2 - hoofdR * 0.1), hoofdR * 0.13,
-          Paint()..color = const Color(0xFFFF5252));
-      canvas.drawCircle(Offset(cx - hoofdR * 0.26, cy2 - hoofdR * 0.1), hoofdR * 0.06,
-          Paint()..color = Colors.black);
-      canvas.drawCircle(Offset(cx + hoofdR * 0.26, cy2 - hoofdR * 0.1), hoofdR * 0.06,
-          Paint()..color = Colors.black);
-      // Kroon.
-      final kroon = Path()
-        ..moveTo(cx - hoofdR * 0.4, cy2 - hoofdR * 0.75)
-        ..lineTo(cx - hoofdR * 0.4, cy2 - hoofdR * 1.1)
-        ..lineTo(cx - hoofdR * 0.2, cy2 - hoofdR * 0.9)
-        ..lineTo(cx, cy2 - hoofdR * 1.15)
-        ..lineTo(cx + hoofdR * 0.2, cy2 - hoofdR * 0.9)
-        ..lineTo(cx + hoofdR * 0.4, cy2 - hoofdR * 1.1)
-        ..lineTo(cx + hoofdR * 0.4, cy2 - hoofdR * 0.75)
-        ..close();
-      canvas.drawPath(kroon, Paint()..color = const Color(0xFFFFD700));
-      // Boss HP-balk (breder!) en dan klaar.
-      _tekenHpBalk(canvas, v, cx, cy2, hoofdR, ch, breedteMult: 1.4);
-      return; // boss heeft geen standaard-gezichtje nodig — eigen look
-    } else {
-      canvas.drawCircle(Offset(cx, cy2), hoofdR, Paint()..color = lichaamDonker);
-      canvas.drawCircle(Offset(cx, cy2), hoofdR - 1.8, Paint()..color = lichaam);
-    }
-
-    // Gezichtje.
-    final (rdx, rdy) = _bewegingsRichting(v);
-    final oogOffsetX = rdx * hoofdR * 0.28;
-    final oogY = cy2 - hoofdR * 0.15 + rdy * hoofdR * 0.08;
-    final oogR = hoofdR * 0.16;
-    for (final sgn in [-1.0, 1.0]) {
-      final oogX = cx + sgn * hoofdR * 0.3 + oogOffsetX;
-      canvas.drawCircle(Offset(oogX, oogY), oogR, Paint()..color = Colors.white);
-      canvas.drawCircle(
-        Offset(oogX + oogOffsetX * 0.5, oogY),
-        oogR * 0.55,
-        Paint()..color = Colors.black,
-      );
-    }
-    // Mondje.
-    final mondPad = Path()
-      ..moveTo(cx - hoofdR * 0.25, cy2 + hoofdR * 0.3)
-      ..quadraticBezierTo(cx, cy2 + hoofdR * 0.55, cx + hoofdR * 0.25, cy2 + hoofdR * 0.3);
-    canvas.drawPath(
-      mondPad,
-      Paint()
-        ..color = Colors.black87
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.4
-        ..strokeCap = StrokeCap.round,
-    );
-
-    // Snel: kuifje-streepjes.
-    if (v.type == VijandType.snel) {
-      for (var i = 0; i < 3; i++) {
-        canvas.drawLine(
-          Offset(cx - hoofdR * (0.2 + i * 0.25), oogY - hoofdR * 0.7),
-          Offset(cx - hoofdR * (0.35 + i * 0.25), oogY - hoofdR * 1.0),
-          Paint()
-            ..color = Colors.white.withValues(alpha: 0.55)
-            ..strokeWidth = 1.4
-            ..strokeCap = StrokeCap.round,
+          Paint()..color = hpKleur,
         );
       }
     }
-
-    // HP-balkje.
-    _tekenHpBalk(canvas, v, cx, cy2, hoofdR, ch);
   }
 
-  void _tekenHpBalk(
-    Canvas canvas,
-    Vijand v,
-    double cx,
-    double cy2,
-    double hoofdR,
-    double ch, {
-    double breedteMult = 1.0,
-  }) {
+  void _tekenMoab(Canvas canvas, Vijand v, double cx, double cy, double cw, double ch) {
+    // MOAB: blimp-lichaam met vinnen, rood streep en HP-balk.
+    final breedte = cw * 1.5;
+    final hoogte = ch * 0.75;
+    final hoek = _moabRichting(state.pad, v.afstand);
+
+    canvas.save();
+    canvas.translate(cx, cy);
+    canvas.rotate(hoek);
+
+    canvas.drawOval(
+      Rect.fromCenter(
+          center: Offset(0, hoogte * 0.75), width: breedte, height: hoogte * 0.4),
+      Paint()..color = Colors.black.withValues(alpha: 0.25),
+    );
+
+    final romp = RRect.fromRectAndRadius(
+      Rect.fromCenter(center: Offset(0, 0), width: breedte, height: hoogte),
+      Radius.circular(hoogte / 2),
+    );
+    canvas.drawRRect(romp, Paint()..color = const Color(0xFF37474F));
+    canvas.drawRRect(romp.deflate(2.5), Paint()..color = const Color(0xFF546E7A));
+    canvas.drawRect(
+      Rect.fromCenter(center: Offset(0, 0), width: breedte - 12, height: hoogte * 0.22),
+      Paint()..color = const Color(0xFFB71C1C),
+    );
+    canvas.drawCircle(Offset(breedte / 2, 0), hoogte * 0.22, Paint()..color = const Color(0xFF263238));
+    for (final sgn in [-1.0, 1.0]) {
+      canvas.drawPath(
+        Path()
+          ..moveTo(-breedte / 2 + 4, 0)
+          ..lineTo(-breedte / 2 - 8, sgn * hoogte * 0.55)
+          ..lineTo(-breedte / 2 + 10, sgn * hoogte * 0.18)
+          ..close(),
+        Paint()..color = const Color(0xFF263238),
+      );
+    }
+
+    // HP-balk.
     final hpFrac = (v.hp / v.hpMax).clamp(0.0, 1.0);
-    final balkBreedte = hoofdR * 2.6 * breedteMult;
-    final balkY = cy2 - hoofdR - ch * 0.16;
+    final balkBreedte = breedte;
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromCenter(center: Offset(cx, balkY), width: balkBreedte, height: 4.6),
-        const Radius.circular(2.3),
+        Rect.fromCenter(center: Offset(0, -hoogte * 0.9), width: balkBreedte, height: 6),
+        const Radius.circular(3),
       ),
       Paint()..color = Colors.black.withValues(alpha: 0.55),
     );
@@ -690,26 +782,24 @@ class GamePainter extends CustomPainter {
       canvas.drawRRect(
         RRect.fromRectAndRadius(
           Rect.fromCenter(
-            center: Offset(cx - balkBreedte / 2 + balkBreedte * hpFrac / 2, balkY),
-            width: (balkBreedte - 1.2) * hpFrac,
-            height: 3.6,
+            center: Offset(-balkBreedte / 2 + balkBreedte * hpFrac / 2, -hoogte * 0.9),
+            width: (balkBreedte - 1.5) * hpFrac,
+            height: 4.6,
           ),
-          const Radius.circular(1.8),
+          const Radius.circular(2.3),
         ),
         Paint()..color = hpKleur,
       );
     }
+
+    canvas.restore();
   }
 
-  (double, double) _bewegingsRichting(Vijand v) {
-    const epsilon = 0.05;
-    final (x1, y1) = positieOpPad(state.pad, math.max(0.0, v.afstand - epsilon));
-    final (x2, y2) = positieOpPad(state.pad, v.afstand + epsilon);
-    final dx = x2 - x1;
-    final dy = y2 - y1;
-    final len = math.sqrt(dx * dx + dy * dy);
-    if (len == 0) return (0, 0);
-    return (dx / len, dy / len);
+  double _moabRichting(List<(double, double)> pad, double afstand) {
+    const epsilon = 0.1;
+    final (x1, y1) = positieOpPad(pad, math.max(0.0, afstand - epsilon));
+    final (x2, y2) = positieOpPad(pad, afstand + epsilon);
+    return math.atan2(y2 - y1, x2 - x1);
   }
 
   void _tekst(Canvas canvas, String label, double cx, double cy, double size) {

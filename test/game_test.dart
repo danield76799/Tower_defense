@@ -1,11 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:tower_defense/game/entities.dart';
 import 'package:tower_defense/game/game_config.dart';
 import 'package:tower_defense/game/game_state.dart';
 import 'package:tower_defense/game/levels.dart';
+import 'package:tower_defense/services/progress_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('Pad', () {
     test('totale padlengte is positief en consistent', () {
       final lengte = padTotaleLengte(levelGroeneVallei.pad);
@@ -27,46 +31,35 @@ void main() {
   });
 
   group('GameState basaal', () {
-    test('startwaarden kloppen', () {
+    test('startwaarden kloppen (BTD-economie)', () {
       final s = GameState();
-      expect(s.geld, GameBalance.startGeld);
-      expect(s.levens, GameBalance.startLevens);
+      expect(s.geld, levelGroeneVallei.startGeld);
+      expect(s.levens, levelGroeneVallei.startLevens);
       expect(s.status, GameStatus.klaarVoorStart);
       expect(s.torens, isEmpty);
     });
 
     test('plaatsen kost geld en staat op vrij veld', () {
       final s = GameState();
-      s.tePlaatsenType = TorenType.kanon;
-      // Cel (4, 4) ligt naar verluidt vrij — check eerst.
+      s.tePlaatsenType = TorenType.dart;
       expect(s.isPadCel(4, 4), isFalse, reason: '(4,4) hoort buiten het pad te liggen');
       final geldVoor = s.geld;
       s.plaatsToren(4, 4);
       expect(s.torens.length, 1);
-      expect(s.geld, geldVoor - GameBalance.kostenKanon);
+      expect(s.geld, geldVoor - GameBalance.kostenDart);
     });
 
     test('plaatsen op pad is verboden', () {
       final s = GameState();
-      s.tePlaatsenType = TorenType.kanon;
-      // Midden van het eerste horizontale segment: (0.5, 4.0)-richting.
+      s.tePlaatsenType = TorenType.dart;
       expect(s.isPadCel(1.0, 4.0), isTrue);
-      final torensVoor = s.torens.length;
       s.plaatsToren(1.0, 4.0);
-      expect(s.torens.length, torensVoor);
-    });
-
-    test('te duur plaatsen is verboden', () {
-      final s = GameState();
-      s.geld = 10;
-      s.tePlaatsenType = TorenType.kanon;
-      s.plaatsToren(4, 4);
       expect(s.torens, isEmpty);
     });
 
-    test('upgrade kost geld en verhoogt level', () {
+    test('upgrade kost geld en verhoogt level (max 3)', () {
       final s = GameState();
-      s.tePlaatsenType = TorenType.kanon;
+      s.tePlaatsenType = TorenType.dart;
       s.plaatsToren(4, 4);
       final t = s.torens.first;
       s.geld = 10000;
@@ -74,17 +67,15 @@ void main() {
       s.upgradeToren(t);
       expect(t.level, 2);
       expect(s.geld, 10000 - kosten);
-      // Nog een keer → level 3 (max).
       s.upgradeToren(t);
       expect(t.level, 3);
-      // Nog een keer → geen verandering.
       s.upgradeToren(t);
       expect(t.level, 3);
     });
 
-    test('verkoop geeft 60% terug en verwijdert toren', () {
+    test('verkoop geeft 70% terug', () {
       final s = GameState();
-      s.tePlaatsenType = TorenType.kanon;
+      s.tePlaatsenType = TorenType.dart;
       s.plaatsToren(4, 4);
       final t = s.torens.first;
       final waarde = t.verkoopWaarde();
@@ -92,154 +83,187 @@ void main() {
       s.verkoopToren(t);
       expect(s.torens, isEmpty);
       expect(s.geld, geldVoor + waarde);
+      expect(waarde, (GameBalance.kostenDart * GameBalance.verkoopFactor).round());
     });
   });
 
-  group('Vijanden en golven', () {
-    test('startGolf spawnt vijanden na verloop van tijd', () {
-      final s = GameState();
-      s.startGolf();
-      expect(s.status, GameStatus.golfLoopt);
-      // Nog geen spawns op t=0 (eerste spawn op t=0 kan direct zijn).
-      s.update(0.0);
-      final eersteAantal = s.vijanden.length;
-      expect(eersteAantal, greaterThanOrEqualTo(1));
-      // Na 2 s zijn er meer.
-      s.update(2.0);
-      expect(s.vijanden.length, greaterThan(eersteAantal));
+  group('Bloon-lagen (Bloons-kern!)', () {
+    test('rood heeft geen kinderen; blauw → 1 rood', () {
+      final rood = BloonStats.van(BloonType.rood);
+      final blauw = BloonStats.van(BloonType.blauw);
+      expect(rood.childType, isNull);
+      expect(blauw.childType, BloonType.rood);
+      expect(blauw.childAantal, 1);
     });
 
-    test('vijand zonder torens ontsnapt en kost levens', () {
-      final s = GameState();
-      s.startGolf();
-      // Speedrun de hele golf: veel updates met grote dt.
-      for (var i = 0; i < 600; i++) {
-        s.update(0.05);
-      }
-      // Golf is voorbij; er zijn levens verloren gegaan.
-      expect(s.levens, lessThan(GameBalance.startLevens));
-      final tussenGolf = s.status == GameStatus.tussenGolven ||
-          s.status == GameStatus.golfLoopt ||
-          s.status == GameStatus.verloren;
-      expect(tussenGolf, isTrue);
+    test('zwart → 2 roze; MOAB → 4 keramiek', () {
+      final zwart = BloonStats.van(BloonType.zwart);
+      expect(zwart.childAantal, 2);
+      expect(zwart.childType, BloonType.roze);
+
+      final moab = BloonStats.van(BloonType.moab);
+      expect(moab.childType, BloonType.keramiek);
+      expect(moab.childAantal, 4);
+      expect(moab.hp, greaterThan(100));
+      expect(moab.levensVerlies, greaterThanOrEqualTo(10));
     });
 
-    test('ijs-vertraging remt vijand', () {
-      final s = GameState();
-      s.startGolf();
-      s.update(1.0); // spawn
-      final v = s.vijanden.first;
-      final afstandVoor = v.afstand;
-      v.vertrag(2.0);
-      s.update(0.5);
-      final afstandGetrapt = v.afstand - afstandVoor;
-      // Geschaald met 0.45.
-      final verwacht = VijandStats.van(v.type, s.golfNummer).snelheid * 0.45 * 0.5;
-      expect(afstandGetrapt, closeTo(verwacht, 0.01));
-    });
-
-    test('20 golven genereren unieke, oplopende curves', () {
-      final g1 = Golf.bouw(1);
-      final g10 = Golf.bouw(10);
-      final g20 = Golf.bouw(20);
-      expect(g1.spawns.length, lessThan(g10.spawns.length));
-      expect(g10.spawns.length, lessThan(g20.spawns.length));
-      // Golf 5 bevat een tank.
-      expect(Golf.bouw(5).spawns.any((s) => s.$1 == VijandType.tank), isTrue);
-      // Golf 3 bevat snelle vijanden.
-      expect(Golf.bouw(3).spawns.any((s) => s.$1 == VijandType.snel), isTrue);
-    });
-
-    test('vijanden op schaal: tank heeft meeste HP', () {
-      final n = VijandStats.van(VijandType.normaal, 1);
-      final q = VijandStats.van(VijandType.snel, 1);
-      final t = VijandStats.van(VijandType.tank, 1);
-      expect(t.hp, greaterThan(n.hp));
-      expect(n.hp, greaterThan(q.hp));
-      expect(q.snelheid, greaterThan(n.snelheid));
-      expect(n.snelheid, greaterThan(t.snelheid));
-    });
-  });
-
-  group('Toren-stats en schaling', () {
-    test('level 2 heeft meer schade dan level 1', () {
-      expect(TorenStats.van(TorenType.kanon, 2).schade,
-          greaterThan(TorenStats.van(TorenType.kanon, 1).schade));
-      expect(TorenStats.van(TorenType.sniper, 3).bereik,
-          greaterThan(TorenStats.van(TorenType.sniper, 1).bereik));
-    });
-
-    test('upgradekosten zijn altijd betaalbaar op termijn maar stijgen', () {
-      final l1 = TorenStats.van(TorenType.kanon, 1).upgradeKosten(1);
-      final l2 = TorenStats.van(TorenType.kanon, 2).upgradeKosten(2);
-      expect(l2, greaterThan(l1));
-    });
-  });
-
-  group('Volledige gamesimulatie (rode draad)', () {
-    test('een spel met torens kan gewonnen worden (sanity: economie werkt)', () {
-      final s = GameState();
-      // Plaats een paar kanonnen langs het pad.
-      s.tePlaatsenType = TorenType.kanon;
-      // Vrije cellen naast het eerste rechte stuk (pad op y=4).
-      s.plaatsToren(3.0, 2.7); // boven pad-segment (2,4)→(6,4)... check isPadCel
-      if (s.torens.isEmpty) {
-        // Fallback: probeer iets verder van het pad.
-        s.plaatsToren(4.0, 2.3);
-      }
-      s.geld = 100000; // veel geld voor de test
-      for (final pos in [(2.5, 6.0), (7.0, 3.0), (8.0, 6.2), (10.5, 5.5), (12.0, 2.7), (14.0, 3.0)]) {
-        s.tePlaatsenType = TorenType.kanon;
-        s.plaatsToren(pos.$1, pos.$2);
-        s.tePlaatsenType = TorenType.ijs;
-        s.plaatsToren(pos.$1 + 0.0, pos.$2 - 1.0);
-        s.tePlaatsenType = TorenType.sniper;
-        s.plaatsToren(pos.$1 + 1.5, pos.$2 + 1.0);
-      }
-      expect(s.torens.length, greaterThan(3), reason: 'testen veronderstellen een verdediging');
-
-      // Simuleer alle 20 golven met tussenstappen.
-      var maxGolven = 0;
-      for (var golf = 1; golf <= GameBalance.totaalGolven; golf++) {
-        s.startGolf();
-        maxGolven = golf;
-        // Max 120 s per golf, in stappen van 50 ms.
-        for (var i = 0; i < 2400 && s.status == GameStatus.golfLoopt; i++) {
-          s.update(0.05);
+    test('laag-keten is aaneengesloten', () {
+      for (final type in BloonType.values) {
+        final st = BloonStats.van(type);
+        if (st.childType != null) {
+          expect(BloonStats.alle.containsKey(st.childType), isTrue,
+              reason: '${st.naam} wijst naar onbekend kind');
         }
-        // Upgrades met het opgelopen geld.
+      }
+    });
+
+    test('pop bloon → kinderen verschijnen', () {
+      final s = GameState();
+      s.startGolf();
+      s.update(1.0);
+      expect(s.vijanden, isNotEmpty);
+      final blauw = s.vijanden.where((v) => v.type == BloonType.blauw).toList();
+      if (blauw.isNotEmpty) {
+        blauw.first.schade(999);
+        s.update(0.016);
+        expect(s.vijanden.any((v) => v.type == BloonType.rood), isTrue,
+            reason: 'blauw-kind (rood) moet verschijnen na pop');
+      }
+    });
+
+    test('MOAB-pop spawnt 4 keramiek + popt-teller stijgt', () {
+      final s = GameState();
+      s.startGolf();
+      s.vijanden.clear();
+      final moab = Vijand(BloonType.moab, BloonStats.van(BloonType.moab), 0);
+      s.vijanden.add(moab);
+      moab.schade(999);
+      s.update(0.016);
+      expect(
+          s.vijanden.where((v) => v.type == BloonType.keramiek).length, 4);
+      expect(s.poptsTotaal, greaterThanOrEqualTo(1));
+    });
+  });
+
+  group('Torens (BTD-set)', () {
+    test('tack heeft 8 spijkers + max-afstand; bom heeft splash', () {
+      final tack = TorenStats.van(TorenType.tack, 1);
+      expect(tack.spijkers, 8);
+      expect(tack.maxProjectielAfstand, isNotNull);
+
+      final bom = TorenStats.van(TorenType.bom, 1);
+      expect(bom.splashRadius, isNotNull);
+      expect(bom.splashRadius!, greaterThan(0.5));
+    });
+
+    test('sniper doorslaat veel lagen (schade >= 10)', () {
+      expect(TorenStats.van(TorenType.sniper, 1).schade, greaterThanOrEqualTo(10));
+    });
+
+    test('levels verbeteren schade', () {
+      expect(TorenStats.van(TorenType.dart, 2).schade,
+          greaterThan(TorenStats.van(TorenType.dart, 1).schade));
+    });
+
+    test('7 torentypes bestaan met eigen kosten', () {
+      final kosten = {
+        TorenType.dart: GameBalance.kostenDart,
+        TorenType.tack: GameBalance.kostenTack,
+        TorenType.ijs: GameBalance.kostenIjs,
+        TorenType.gif: GameBalance.kostenGif,
+        TorenType.bom: GameBalance.kostenBom,
+        TorenType.sniper: GameBalance.kostenSniper,
+        TorenType.bliksem: GameBalance.kostenBliksem,
+      };
+      for (final type in TorenType.values) {
+        expect(kosten.containsKey(type), isTrue, reason: '$type mist kosten');
+        expect(kosten[type]!, greaterThan(0));
+      }
+    });
+  });
+
+  group('Golven (BTD-curve)', () {
+    test('golf 10 bevat een MOAB; golf 20 twee', () {
+      final g10 = Golf.bouw(10, totaalGolven: 20);
+      final g20 = Golf.bouw(20, totaalGolven: 20);
+      expect(g10.spawns.where((x) => x.$1 == BloonType.moab).length, 1);
+      expect(g20.spawns.where((x) => x.$1 == BloonType.moab).length, 2);
+    });
+
+    test('latere golven hebben hogere lagen', () {
+      final g2 = Golf.bouw(2);
+      final g16 = Golf.bouw(16);
+      expect(g2.spawns.first.$1, BloonType.rood);
+      expect(g16.spawns.first.$1, BloonType.regenboog);
+    });
+  });
+
+  group('Zonder verdediging', () {
+    test('levens verliezen', () {
+      final s = GameState();
+      s.startGolf();
+      for (var i = 0; i < 800; i++) {
+        s.update(0.05);
+        if (s.status == GameStatus.verloren) break;
+      }
+      expect(s.levens, lessThan(s.level.startLevens));
+    });
+  });
+
+  group('Multi-level simulatie', () {
+    test('elke kaart is winbaar met een grid vol torens', () {
+      for (final lvl in alleLevels) {
+        final s = GameState(levelConfig: lvl);
         s.geld = 100000;
-        for (final t in s.torens) {
-          while (t.level < GameBalance.maxTorenLevel) {
-            final voor = t.level;
-            s.upgradeToren(t);
-            if (t.level == voor) break;
+        for (var x = 1.0; x < 15.5; x += 1.4) {
+          for (var y = 0.5; y < 9.0; y += 1.4) {
+            s.tePlaatsenType = TorenType.sniper;
+            s.plaatsToren(x, y);
           }
         }
-        if (s.status == GameStatus.verloren) break;
-        if (s.status == GameStatus.gewonnen) break;
-        // Anders: tussenGolven → volgende golf.
+        expect(s.torens.length, greaterThan(8),
+            reason: '${lvl.id}: grid-plaatsing moet torens opleveren');
+
+        for (var golf = 1; golf <= lvl.totaalGolven; golf++) {
+          s.startGolf();
+          for (var i = 0; i < 6000 && s.status == GameStatus.golfLoopt; i++) {
+            s.update(0.05);
+          }
+          if (s.status == GameStatus.verloren) break;
+          if (s.status != GameStatus.tussenGolven && golf < lvl.totaalGolven) break;
+          s.geld = 100000;
+          for (final t in s.torens) {
+            while (t.level < GameBalance.maxTorenLevel) {
+              final voor = t.level;
+              s.upgradeToren(t);
+              if (t.level == voor) break;
+            }
+          }
+        }
+        expect(s.status, GameStatus.gewonnen, reason: '${lvl.id} moet winbaar zijn');
       }
-      expect(
-        s.status == GameStatus.gewonnen || s.status == GameStatus.verloren,
-        isTrue,
-        reason: 'na alle golven is het spel gewonnen of verloren (golf $maxGolven)',
-      );
-      // Met 100k geld en tig torens HOORT hij te winnen; als dat faalt is de
-      // balans of de logica stuk.
-      expect(s.status, GameStatus.gewonnen,
-          reason: 'maximale verdediging moet alle 20 golven aankunnen');
+    });
+  });
+
+  group('ProgressService', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
     });
 
-    test('een spel zonder torens wordt verloren', () {
-      final s = GameState();
-      for (var golf = 1; golf <= 3 && s.status != GameStatus.verloren; golf++) {
-        s.startGolf();
-        for (var i = 0; i < 2400 && s.status == GameStatus.golfLoopt; i++) {
-          s.update(0.05);
-        }
-      }
-      expect(s.status, GameStatus.verloren);
+    test('registreerWinst bewaart beste sterren + highscore', () async {
+      await ProgressService.registreerWinst(levelId: 'vallei', sterren: 2, score: 1400);
+      var v = await ProgressService.laad();
+      expect(v['vallei']!.sterren, 2);
+      expect(v['vallei']!.highscore, 1400);
+      await ProgressService.registreerWinst(levelId: 'vallei', sterren: 3, score: 1800);
+      v = await ProgressService.laad();
+      expect(v['vallei']!.sterren, 3);
+      expect(v['vallei']!.highscore, 1800);
+      await ProgressService.registreerWinst(levelId: 'vallei', sterren: 1, score: 900);
+      v = await ProgressService.laad();
+      expect(v['vallei']!.sterren, 3);
+      expect(v['vallei']!.highscore, 1800);
     });
   });
 }

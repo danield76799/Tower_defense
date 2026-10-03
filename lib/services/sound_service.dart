@@ -16,7 +16,7 @@ enum SoundEffect {
 
 class SoundService {
   final AudioPlayer _player = AudioPlayer();
-  bool _muted = true; // standaard stil; gebruiker kan aanzetten
+  bool _muted = false; // standaard AAN; voorkeur wordt bewaard in prefs
 
   bool setMuted(bool muted) => _muted = muted;
   bool get muted => _muted;

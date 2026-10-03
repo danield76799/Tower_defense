@@ -58,4 +58,17 @@ class ProgressService {
         e.key: {'sterren': e.value.sterren, 'highscore': e.value.highscore},
     }));
   }
+
+  static const _keySound = 'tower_defense_geluid_muted_v1';
+
+  /// Geluid-voorkeur (muted) bewaren/teruglezen.
+  static Future<void> bewaarSoundMuted(bool muted) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keySound, muted);
+  }
+
+  static Future<bool> laadSoundMuted() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keySound) ?? false; // standaard: geluid AAN
+  }
 }

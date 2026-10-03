@@ -216,6 +216,8 @@ class _GameScreenState extends State<GameScreen>
     super.initState();
     _state = GameState(levelConfig: widget.levelConfig);
     _ticker = createTicker(_onTick)..start();
+    // Geluid-voorkeur teruglezen (standaard aan in de app, mute is gebruikerskeuze).
+    ProgressService.laadSoundMuted().then((m) => _sound.setMuted(m));
   }
 
   void _onTick(Duration elapsed) {
@@ -466,6 +468,7 @@ class _GameScreenState extends State<GameScreen>
               setState(() {
                 final nu = _sound.muted;
                 _sound.setMuted(!nu);
+                ProgressService.bewaarSoundMuted(_sound.muted);
                 if (_sound.muted == false) _sound.speel(SoundEffect.plaats);
               });
             },
@@ -521,7 +524,8 @@ class _GameScreenState extends State<GameScreen>
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _torenKnop(TorenType.kanon, '💥', GameBalance.kostenKanon),
+                _torenKnop(TorenType.dart, '🏹', GameBalance.kostenDart),
+                _torenKnop(TorenType.tack, '🎇', GameBalance.kostenTack),
                 _torenKnop(TorenType.ijs, '❄️', GameBalance.kostenIjs),
                 _torenKnop(TorenType.sniper, '🎯', GameBalance.kostenSniper),
                 _torenKnop(TorenType.bliksem, '⚡', GameBalance.kostenBliksem),
@@ -636,11 +640,13 @@ class _GameScreenState extends State<GameScreen>
     final maxLevel = t.level >= GameBalance.maxTorenLevel;
     final upgradeKosten = maxLevel ? 0 : stats.upgradeKosten(t.level);
     final emoji = switch (t.type) {
-      TorenType.kanon => '💥',
+      TorenType.dart => '🏹',
+      TorenType.tack => '🎇',
       TorenType.ijs => '❄️',
       TorenType.sniper => '🎯',
       TorenType.bliksem => '⚡',
       TorenType.gif => '🧪',
+      TorenType.bom => '💣',
     };
     return Container(
       margin: const EdgeInsets.only(top: 6),
