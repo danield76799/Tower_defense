@@ -7,21 +7,48 @@ class Vijand {
   final BloonType type;
   final BloonStats stats;
 
+  /// Golf-modifiers die op deze bloon rusten (YouTD2-geïnspireerd).
+  final List<GolfModifier> modifiers;
+
   double _afstand; // afgelegde afstand langs het pad (in cellen)
   double hp;
+  double hpStart; // referentie voor regeneratie-plafond
   double vertragingTijd = 0; // ijs-effect
   double gifTijd = 0; // gif-effect: 8 hp/s extra
   double fase = 0; // animatiefase
   bool dood = false;
   bool ontsnapt = false;
 
-  Vijand(this.type, this.stats, double startAfstand)
+  Vijand(this.type, this.stats, double startAfstand, {this.modifiers = const []})
       : _afstand = startAfstand,
-        hp = stats.hp;
+        hp = stats.hp *
+            (modifiers.contains(GolfModifier.sterk) ? _sterkFactor : 1.0),
+        hpStart = stats.hp *
+            (modifiers.contains(GolfModifier.sterk) ? _sterkFactor : 1.0);
+
+  static const _sterkFactor = 1.25;
 
   double get afstand => _afstand;
-  double get hpMax => stats.hp;
+  double get hpMax => hpStart;
   bool get isDood => dood || ontsnapt;
+
+  bool heeft(GolfModifier m) => modifiers.contains(m);
+
+  /// Effectieve loopsnelheid: basis × Snel-modifier (+35%).
+  double get effectieveSnelheid =>
+      stats.snelheid * (heeft(GolfModifier.snel) ? 1.35 : 1.0);
+
+  /// Schade na weerstand van de modifier die tegen dit schade-type geldt
+  /// (Gepantserd/Schild: 35% minder).
+  double schadeNaWeerstand(double bedrag, SchadeType schadeType) {
+    if (schadeType == SchadeType.fysiek && heeft(GolfModifier.gepantserd)) {
+      return bedrag * 0.65;
+    }
+    if (schadeType == SchadeType.magisch && heeft(GolfModifier.magischSchild)) {
+      return bedrag * 0.65;
+    }
+    return bedrag;
+  }
 
   /// Restant-schade na het popt van deze laag (doordringing in kinderen).
   double neemSchade(double bedrag) {
@@ -41,6 +68,11 @@ class Vijand {
     if (hp <= 0) dood = true;
   }
 
+  /// Schade mét schade-type (modifier-weerstand verrekend).
+  void schadeMetType(double bedrag, SchadeType type) {
+    schade(schadeNaWeerstand(bedrag, type));
+  }
+
   void vertrag(double seconden) {
     if (dood || ontsnapt) return;
     vertragingTijd = math.max(vertragingTijd, seconden);
@@ -55,8 +87,13 @@ class Vijand {
     if (dood || ontsnapt) return;
     final factor = vertragingTijd > 0 ? 0.45 : 1.0;
     if (vertragingTijd > 0) vertragingTijd -= dt;
-    _afstand += stats.snelheid * factor * dt;
+    _afstand += effectieveSnelheid * factor * dt;
     fase += dt * 9 * factor;
+
+    // Regen-modifier: herstelt 0,5 hp/s tot het startmaximum.
+    if (heeft(GolfModifier.regenererend) && hp < hpStart) {
+      hp = math.min(hpStart, hp + dt * 0.5);
+    }
 
     if (gifTijd > 0) {
       gifTijd -= dt;
@@ -225,10 +262,13 @@ class Projectiel {
   }
 
   /// Raak een bloon: schade + effect. Geen dubbele raak op zelfde bloon.
+  /// Modifier-weerstand (Gepantserd/Schild) wordt hier verrekend via het
+  /// schade-type van de toren.
   void raakBloon(Vijand v) {
     if (geraakt.contains(v)) return;
     geraakt.add(v);
-    v.schade(schade);
+    final schadeType = type.schadeType;
+    v.schadeMetType(schade, schadeType);
     if (vertragingPerTref != null && vertragingPerTref! > 0) {
       v.vertrag(vertragingPerTref!);
     }
@@ -273,8 +313,13 @@ class Golf {
   /// MOAB-HP-multiplier voor deze golf (intro-MOAB zachter).
   final double moabHpMult;
 
-  Golf(this.nummer, this.spawns, {double? moabHpMult})
-      : moabHpMult = moabHpMult ?? moabHpMultiplier(nummer, nummer);
+  /// Golf-modifiers (YouTD2-geïnspireerd) die op álle bloons van deze golf
+  /// rusten — bepaald door het deterministische golf-schema.
+  final List<GolfModifier> modifiers;
+
+  Golf(this.nummer, this.spawns, {double? moabHpMult, List<GolfModifier>? modifiers})
+      : moabHpMult = moabHpMult ?? moabHpMultiplier(nummer, nummer),
+        modifiers = modifiers ?? const [];
 
   /// MOAB-HP-multiplier per golf: introductie-MOAB (golf 10) is zacht
   /// (0.35×), golf 15 middenmoab (0.55×), finale full HP.
@@ -285,10 +330,13 @@ class Golf {
   }
 
   /// BTD-achtige curve: steeds hogere lagen, vanaf golf 10 MOAB-waarschuwing.
+  /// [modifiers] zijn de golf-eigenschappen (YouTD2-schema) die op alle
+  /// bloons van deze golf komen te rusten.
   static Golf bouw(
     int nummer, {
     int totaalGolven = GameBalance.totaalGolven,
     double? moabHpMult,
+    List<GolfModifier>? modifiers,
   }) {
     final spawns = <(BloonType, double)>[];
     var t = 0.0;
@@ -331,7 +379,7 @@ class Golf {
       spawns.add((BloonType.moab, t + 4.0));
     }
 
-    return Golf(nummer, spawns, moabHpMult: moabHpMult);
+    return Golf(nummer, spawns, moabHpMult: moabHpMult, modifiers: modifiers);
   }
 
   double get totaleDuur => spawns.isEmpty ? 0 : spawns.last.$2 + 2.0;

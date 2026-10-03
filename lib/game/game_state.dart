@@ -31,6 +31,11 @@ class GameState {
   TorenType? tePlaatsenType;
   Toren? geselecteerdeToren;
 
+  /// Golf-modifiers aan/uit. Standaard aan; de balans-tests zetten dit uit om
+  /// het effect van de modifiers los te meten (en het is de haak voor een
+  /// toekomstige "rustige modus").
+  bool modifiersActief = true;
+
   String? toast;
 
   GameState({LevelConfig? levelConfig})
@@ -108,12 +113,23 @@ class GameState {
       golfNummer,
       totaalGolven: level.totaalGolven,
       moabHpMult: Golf.moabHpMultiplier(golfNummer, level.totaalGolven),
+      modifiers: modifiersActief
+          ? modifiersVoorGolf(golfNummer, level.totaalGolven)
+          : const [],
     );
     _golfTijd = 0;
     _spawnIndex = 0;
     status = GameStatus.golfLoopt;
     toast = null;
   }
+
+  /// Modifiers van de lopende golf (voor de HUD).
+  List<GolfModifier> get actieveModifiers => _huidigeGolf?.modifiers ?? const [];
+
+  /// Modifiers van de volgende golf (voor waarschuwing in de HUD).
+  List<GolfModifier> get volgendeModifiers => modifiersActief
+      ? modifiersVoorGolf(golfNummer + 1, level.totaalGolven)
+      : const [];
 
   /// De hoofd-tick. dt in seconden.
   void update(double dt) {
@@ -124,15 +140,17 @@ class GameState {
 
     // Spawns.
     final spawns = _huidigeGolf!.spawns;
+    final golfMods = _huidigeGolf!.modifiers;
     while (_spawnIndex < spawns.length && spawns[_spawnIndex].$2 <= _golfTijd) {
       final (type, _) = spawns[_spawnIndex];
       final stats0 = BloonStats.van(type);
-      var hp = stats0.hp;
+      final v = Vijand(type, stats0, 0.0, modifiers: golfMods);
       if (type == BloonType.moab) {
-        hp = stats0.hp * _huidigeGolf!.moabHpMult;
+        // MOAB-HP-schaling bovenop de Sterk-modifier (1.25×, gelijk aan Vijand).
+        final sterkFactor = v.heeft(GolfModifier.sterk) ? 1.25 : 1.0;
+        v.hp = stats0.hp * _huidigeGolf!.moabHpMult * sterkFactor;
+        v.hpStart = v.hp;
       }
-      final v = Vijand(type, stats0, 0.0);
-      v.hp = hp;
       vijanden.add(v);
       _spawnIndex++;
     }
@@ -216,13 +234,17 @@ class GameState {
     vijanden.removeWhere((v) {
       if (v.ontsnapt) return true;
       if (!v.dood) return false;
-      geld += v.stats.geldPerPop;
+      geld += v.stats.geldPerPop * (v.heeft(GolfModifier.rijk) ? 2 : 1);
       poptsTotaal++;
       final childType = v.stats.childType;
       if (childType == null) return true;
       for (var i = 0; i < v.stats.childAantal; i++) {
-        nieuweVijanden
-            .add(Vijand(childType, BloonStats.van(childType), v.afstand - i * 0.18));
+        nieuweVijanden.add(Vijand(
+          childType,
+          BloonStats.van(childType),
+          v.afstand - i * 0.18,
+          modifiers: v.modifiers, // kinderen erven de golf-eigenschappen
+        ));
       }
       return true;
     });
@@ -279,6 +301,7 @@ class GameState {
   }
 
   /// Splash: alle bloons binnen straal van (x,y) nemen schade.
+  /// De bom is fysiek, dus Gepantserd halveert ook hier.
   void _doeSplash(double x, double y, double radius, double schade) {
     for (final v in vijanden) {
       if (v.dood || v.ontsnapt) continue;
@@ -286,7 +309,7 @@ class GameState {
       final dx = vx - x;
       final dy = vy - y;
       if (math.sqrt(dx * dx + dy * dy) <= radius) {
-        v.schade(schade);
+        v.schadeMetType(schade, SchadeType.fysiek);
       }
     }
   }

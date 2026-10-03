@@ -123,6 +123,125 @@ class GameBalance {
 /// Toren-types (Bloons-getint).
 enum TorenType { dart, tack, ijs, gif, bom, sniper, bliksem }
 
+/// Schade-type: bepaalt hoe een toren tegen golf-modifiers aanloopt.
+/// (YouTD2-schema: physical vs. magical schade met eigen weerstanden.)
+enum SchadeType { fysiek, magisch }
+
+extension TorenTypeSchade on TorenType {
+  /// Dart/tack/bom/sniper doen fysieke schade; ijs/gif/bliksem magische.
+  SchadeType get schadeType => switch (this) {
+        TorenType.dart => SchadeType.fysiek,
+        TorenType.tack => SchadeType.fysiek,
+        TorenType.bom => SchadeType.fysiek,
+        TorenType.sniper => SchadeType.fysiek,
+        TorenType.ijs => SchadeType.magisch,
+        TorenType.gif => SchadeType.magisch,
+        TorenType.bliksem => SchadeType.magisch,
+      };
+}
+
+/// Golf-modifiers (YouTD2-geïnspireerd): elke golf kan eigenschappen op zijn
+/// bloons zetten, zodat golven verschillen in *karakter* in plaats van alleen
+/// "meer HP". Ze zijn deterministisch per golfnummer (geen random), zodat
+/// de balans meetbaar en testbaar blijft.
+///
+/// Balans (gemeten 2026-10-03, test/speler_balans_test.dart): met een
+/// realistische economie (geen geld-cheat, torens bijkopen van wat je
+/// verdient) winnen alle drie de kaarten met deze modifiers aan — kronkel
+/// met 3 levens (spannend), vallei en slang ruim. De effecten zijn bewust
+/// bescheiden (35% weerstand, +35% snelheid, +25% HP): het karakter van de
+/// golf verandert, de winbaarheid niet.
+enum GolfModifier {
+  /// Fysieke schade (dart/tack/bom/sniper) doet 35% minder.
+  gepantserd,
+
+  /// Magische schade (ijs/gif/bliksem) doet 35% minder.
+  magischSchild,
+
+  /// +35% loopsnelheid.
+  snel,
+
+  /// +25% HP.
+  sterk,
+
+  /// Herstelt 0,5 hp/s tot maximaal zijn start-HP.
+  regenererend,
+
+  /// Verdubbelt de geld-opbrengst per pop.
+  rijk,
+}
+
+extension GolfModifierInfo on GolfModifier {
+  String get naam => switch (this) {
+        GolfModifier.gepantserd => 'Gepantserd',
+        GolfModifier.magischSchild => 'Schild',
+        GolfModifier.snel => 'Snel',
+        GolfModifier.sterk => 'Sterk',
+        GolfModifier.regenererend => 'Regen',
+        GolfModifier.rijk => 'Rijk',
+      };
+
+  /// Korte uitleg voor in de HUD-tooltip.
+  String get uitleg => switch (this) {
+        GolfModifier.gepantserd => 'Fysieke schade −35%',
+        GolfModifier.magischSchild => 'Magische schade −35%',
+        GolfModifier.snel => 'Loopsnelheid +35%',
+        GolfModifier.sterk => 'HP +25%',
+        GolfModifier.regenererend => 'Herstelt 0,5 hp/s',
+        GolfModifier.rijk => 'Dubbele opbrengst',
+      };
+
+  /// Kleur van de ring om de bloon (painter).
+  int get kleurArgb => switch (this) {
+        GolfModifier.gepantserd => 0xFF9E9E9E,
+        GolfModifier.magischSchild => 0xFF9C27B0,
+        GolfModifier.snel => 0xFFFFEB3B,
+        GolfModifier.sterk => 0xFFFF5722,
+        GolfModifier.regenererend => 0xFF4CAF50,
+        GolfModifier.rijk => 0xFFFFC107,
+      };
+}
+
+/// Het golf-schema: welke modifiers horen bij welke golf.
+/// Opbouw (20 golven): rustig begin, vanaf golf 5 telkens één nieuw idee,
+/// laatste vijf golven combinaties, finale met drie tegelijk.
+/// Alles deterministisch per golfnummer (geen random) — testbaar en meetbaar.
+List<GolfModifier> modifiersVoorGolf(int golf, int totaalGolven) {
+  final m = <GolfModifier>[];
+  // Eerste kennismaking per modifier (vroege golven = 1 tegelijk).
+  if (golf == 5) m.add(GolfModifier.snel);
+  if (golf == 7) m.add(GolfModifier.gepantserd);
+  if (golf == 9) m.add(GolfModifier.rijk);
+  if (golf == 11) m.add(GolfModifier.regenererend);
+  if (golf == 12) m.add(GolfModifier.magischSchild);
+  if (golf == 14) m.add(GolfModifier.sterk);
+
+  // Laatste vijf golven: combinaties (eindbaas-opbouw), als fractie van het
+  // totaal zodat 20- en 25-golf-kaarten hetzelfde ritme houden.
+  final combo1 = (totaalGolven * 0.80).round();
+  final combo2 = (totaalGolven * 0.90).round();
+  final combo3 = (totaalGolven * 0.95).round();
+  final finale = totaalGolven;
+
+  if (golf == combo1) m.addAll([GolfModifier.gepantserd, GolfModifier.snel]);
+  if (golf == combo2) m.addAll([GolfModifier.regenererend, GolfModifier.rijk]);
+  if (golf == combo3 && combo3 != combo2) {
+    m.addAll([GolfModifier.sterk, GolfModifier.magischSchild]);
+  }
+
+  // Finale: drie eigenschappen tegelijk — het eindbaas-gevoel.
+  if (golf == finale) {
+    m.addAll([
+      GolfModifier.gepantserd,
+      GolfModifier.sterk,
+      GolfModifier.snel,
+    ]);
+  }
+  // Dedupliceer (finale kan overlappen met een combinatiegolf).
+  return m.toSet().toList();
+}
+
+
 /// Per-toren statistieken, geschaald per level (1-based).
 class TorenStats {
   final String naam;

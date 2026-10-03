@@ -698,8 +698,14 @@ class GamePainter extends CustomPainter {
       }
     }
 
+    // Modifier-ringen (YouTD2-geïnspireerd): elke golf-eigenschap heeft een
+    // eigen kleur, zodat je in één oogopslag ziet wat er op deze golf zit.
+    if (v.modifiers.isNotEmpty) {
+      _tekenModifierRingen(canvas, v, cx, cy2, hoofdR);
+    }
+
     // HP-balkje alleen bij meerlagige bloons.
-    if (st.hp > 1) {
+    if (v.hpMax > 1) {
       final hpFrac = (v.hp / v.hpMax).clamp(0.0, 1.0);
       final balkBreedte = hoofdR * 2.2;
       final balkY = cy2 - hoofdR - ch * 0.14;
@@ -725,6 +731,34 @@ class GamePainter extends CustomPainter {
           Paint()..color = hpKleur,
         );
       }
+    }
+  }
+
+  /// Golf-modifier-ringen: één gekleurde ring per eigenschap, net buiten de
+  /// bloon. Kleur volgt GolfModifierInfo.kleurArgb (zie game_config.dart).
+  void _tekenModifierRingen(
+      Canvas canvas, Vijand v, double cx, double cy, double hoofdR) {
+    var ring = 0;
+    for (final m in v.modifiers) {
+      final kleur = Color(m.kleurArgb);
+      final straal = hoofdR * (1.25 + ring * 0.22);
+      canvas.drawCircle(
+        Offset(cx, cy),
+        straal,
+        Paint()
+          ..color = kleur.withValues(alpha: 0.85)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.8,
+      );
+      // Regen: groen pulserende gloed, zodat herstel zichtbaar is.
+      if (m == GolfModifier.regenererend && v.hp < v.hpMax) {
+        canvas.drawCircle(
+          Offset(cx, cy),
+          straal + 1.5,
+          Paint()..color = kleur.withValues(alpha: 0.25),
+        );
+      }
+      ring++;
     }
   }
 
@@ -790,6 +824,27 @@ class GamePainter extends CustomPainter {
         ),
         Paint()..color = hpKleur,
       );
+    }
+
+    // Golf-modifier-ring om de MOAB (zelfde kleuren als gewone bloons).
+    if (v.modifiers.isNotEmpty) {
+      var ring = 0;
+      for (final m in v.modifiers) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromCenter(
+                center: Offset.zero,
+                width: breedte + 12 + ring * 10,
+                height: hoogte + 12 + ring * 10),
+            Radius.circular((hoogte + 12 + ring * 10) / 2),
+          ),
+          Paint()
+            ..color = Color(m.kleurArgb).withValues(alpha: 0.85)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.2,
+        );
+        ring++;
+      }
     }
 
     canvas.restore();

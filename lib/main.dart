@@ -462,6 +462,10 @@ class _GameScreenState extends State<GameScreen>
             ),
           ),
           const Spacer(),
+          // Golf-modifiers: actief (tijdens de golf) of aanstaand (ervoor).
+          if (st.actieveModifiers.isNotEmpty || st.volgendeModifiers.isNotEmpty)
+            _buildModifierChips(st),
+          const SizedBox(width: 6),
           // Geluid aan/uit.
           IconButton(
             onPressed: () {
@@ -485,6 +489,52 @@ class _GameScreenState extends State<GameScreen>
           _statusChip(st.status),
         ],
       ),
+    );
+  }
+
+  /// Golf-modifier-chips: tijdens een golf tonen we de actieve eigenschappen,
+  /// in de tussenpauze de eigenschappen van de vólgende golf (voorbereiding).
+  Widget _buildModifierChips(GameState st) {
+    final actief = st.status == GameStatus.golfLoopt;
+    final mods = actief ? st.actieveModifiers : st.volgendeModifiers;
+    if (mods.isEmpty) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          actief ? 'Deze golf:' : 'Straks:',
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.white.withValues(alpha: 0.75),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: 5),
+        for (final m in mods)
+          Tooltip(
+            message: m.uitleg,
+            child: Container(
+              margin: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+              decoration: BoxDecoration(
+                color: Color(m.kleurArgb).withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Colors.black.withValues(alpha: 0.3),
+                  width: 1.2,
+                ),
+              ),
+              child: Text(
+                m.naam,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.black87,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
