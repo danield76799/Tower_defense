@@ -49,17 +49,16 @@ jobs:
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
+        # key.properties hoort in android/ (rootProject-dir in build.gradle.kts).
+        # Geen ifs met heredoc-inspringing — echo-regelen zijn crash-proof.
         if [ -n "$KEYSTORE_BASE64" ]; then
           echo "$KEYSTORE_BASE64" | base64 -d > android/app/release-keystore.jks
-          cat > android/key.properties << EOF
-          storePassword=$KEYSTORE_PASSWORD
-          keyPassword=$KEY_PASSWORD
-          keyAlias=$KEY_ALIAS
-          storeFile=release-keystore.jks
-          EOF
-          echo "has_signing=true" >> "$GITHUB_OUTPUT"
+          echo "storePassword=$KEYSTORE_PASSWORD" > android/key.properties
+          echo "keyPassword=$KEY_PASSWORD" >> android/key.properties
+          echo "keyAlias=$KEY_ALIAS" >> android/key.properties
+          echo "storeFile=release-keystore.jks" >> android/key.properties
+          echo "Signing: release-keystore via secrets"
         else
-          echo "has_signing=false" >> "$GITHUB_OUTPUT"
           echo "WARNING: no signing secrets — debug-signed APK"
         fi
 
