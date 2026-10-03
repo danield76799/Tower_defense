@@ -6,7 +6,7 @@
 library;
 
 class GameBalance {
-  // Begin-economie.
+  // Begin-economie (per kaart via LevelConfig, dit is de fallback).
   static const int startGeld = 200;
   static const int startLevens = 20;
 
@@ -14,17 +14,20 @@ class GameBalance {
   static const int kostenKanon = 80;
   static const int kostenIjs = 120;
   static const int kostenSniper = 160;
+  static const int kostenBliksem = 220;
+  static const int kostenGif = 140;
   static const double verkoopFactor = 0.6; // 60% van geïnvesteerde terug
 
   // Upgrade-mults per level (level 1..3). Kosten = basis * level.
   static const int maxTorenLevel = 3;
 
-  // Golven.
+  // Golven (per kaart via LevelConfig, dit is de fallback).
   static const int totaalGolven = 20;
 
   // Levensverlies per doorgestane vijand.
   static const int levensVerliesNormaal = 1;
   static const int levensVerliesTank = 2;
+  static const int levensVerliesBoss = 5;
 }
 
 /// Wegen door het raster in cel-middelpunten (x + 0.5, y + 0.5).
@@ -43,10 +46,10 @@ const List<(double, double)> levelPad = [
 ];
 
 /// Vijand-types.
-enum VijandType { normaal, snel, tank }
+enum VijandType { normaal, snel, tank, boss }
 
 /// Toren-types.
-enum TorenType { kanon, ijs, sniper }
+enum TorenType { kanon, ijs, sniper, bliksem, gif }
 
 /// Per-toren statische statistieken, geschaald per level (1-based).
 class TorenStats {
@@ -96,7 +99,7 @@ class TorenStats {
     return m;
   }
 
-  static const Map<TorenType, TorenStats> _basisStats = {
+    static const Map<TorenType, TorenStats> _basisStats = {
     TorenType.kanon: TorenStats(
       naam: 'Kanon',
       basisKosten: GameBalance.kostenKanon,
@@ -124,6 +127,25 @@ class TorenStats {
       schade: 40,
       projectileSnelheid: 18,
       icoonEmoji: '🎯',
+    ),
+    TorenType.bliksem: TorenStats(
+      naam: 'Bliksem',
+      basisKosten: GameBalance.kostenBliksem,
+      bereik: 3.2,
+      vuurInterval: 1.5,
+      schade: 22,
+      projectileSnelheid: 30, // bliksem = vrijwel instant
+      icoonEmoji: '⚡',
+    ),
+    TorenType.gif: TorenStats(
+      naam: 'Gif',
+      basisKosten: GameBalance.kostenGif,
+      bereik: 2.8,
+      vuurInterval: 1.3,
+      schade: 6, // + gif-ticks via vertragingMechanica
+      projectileSnelheid: 7,
+      vertragingPerTref: 0, // geen ijs-vertraging; gif-werkt via VergifStatus
+      icoonEmoji: '🧪',
     ),
   };
 
@@ -168,6 +190,13 @@ class VijandStats {
           snelheid: 0.8,
           geldBijDood: 35,
           levensVerlies: GameBalance.levensVerliesTank,
+        );
+      case VijandType.boss:
+        return VijandStats(
+          hp: (600 * hpMult).round(),
+          snelheid: 0.55,
+          geldBijDood: 150,
+          levensVerlies: GameBalance.levensVerliesBoss,
         );
     }
   }

@@ -128,7 +128,7 @@ class GamePainter extends CustomPainter {
   void _tekenPad(Canvas canvas, double cw, double ch) {
     final path = Path();
     var first = true;
-    for (final (x, y) in levelPad) {
+    for (final (x, y) in state.pad) {
       final px = x * cw;
       final py = y * ch;
       if (first) {
@@ -171,9 +171,9 @@ class GamePainter extends CustomPainter {
     final steen = Paint()..color = const Color(0xFFB39B6B);
     final steenDonker = Paint()..color = const Color(0xFF9C8558);
     var i = 0;
-    for (var seg = 0; seg < levelPad.length - 1; seg++) {
-      final (x1, y1) = levelPad[seg];
-      final (x2, y2) = levelPad[seg + 1];
+    for (var seg = 0; seg < state.pad.length - 1; seg++) {
+      final (x1, y1) = state.pad[seg];
+      final (x2, y2) = state.pad[seg + 1];
       for (var f = 0.15; f < 1.0; f += 0.22) {
         i++;
         final px = (x1 + (x2 - x1) * f) * cw;
@@ -184,8 +184,8 @@ class GamePainter extends CustomPainter {
   }
 
   void _tekenSpawnExit(Canvas canvas, double cw, double ch) {
-    final (sx, sy) = levelPad.first;
-    final (ex, ey) = levelPad.last;
+    final (sx, sy) = state.pad.first;
+    final (ex, ey) = state.pad.last;
 
     // Spawn: rood portaal.
     final sxPx = sx * cw;
@@ -248,16 +248,22 @@ class GamePainter extends CustomPainter {
       TorenType.kanon => const Color(0xFFB85C4A),
       TorenType.ijs => const Color(0xFF4FA3D1),
       TorenType.sniper => const Color(0xFF8B6BC7),
+      TorenType.bliksem => const Color(0xFFFFD600),
+      TorenType.gif => const Color(0xFF7CB342),
     };
     final donker = switch (t.type) {
       TorenType.kanon => const Color(0xFF8A4234),
       TorenType.ijs => const Color(0xFF3B7FA6),
       TorenType.sniper => const Color(0xFF6A4F9E),
+      TorenType.bliksem => const Color(0xFFC7A600),
+      TorenType.gif => const Color(0xFF558B2F),
     };
     final licht = switch (t.type) {
       TorenType.kanon => const Color(0xFFD9826C),
       TorenType.ijs => const Color(0xFF7EC3E6),
       TorenType.sniper => const Color(0xFFAF8FE0),
+      TorenType.bliksem => const Color(0xFFFFF176),
+      TorenType.gif => const Color(0xFFAED581),
     };
 
     // Grondschaduw.
@@ -299,32 +305,67 @@ class GamePainter extends CustomPainter {
     final loopX = torenCx + math.cos(richting) * loopLengte;
     final loopY = torenCy + math.sin(richting) * loopLengte;
 
-    if (t.type == TorenType.ijs) {
-      // Kristal-bol die zacht knippert.
-      final knipoog = (math.sin(t.animTijd * 3) + 1) / 2;
-      canvas.drawCircle(
-        Offset(torenCx, torenCy - 2),
-        torenR * 0.48,
-        Paint()
-          ..color = Color.lerp(const Color(0xFFB3E5FC), Colors.white, knipoog * 0.5)!,
-      );
-    } else {
-      canvas.drawLine(
-        Offset(torenCx, torenCy),
-        Offset(loopX, loopY),
-        Paint()
-          ..color = donker
-          ..strokeWidth = loopDikte * 1.7
-          ..strokeCap = StrokeCap.round,
-      );
-      canvas.drawLine(
-        Offset(torenCx, torenCy),
-        Offset(loopX, loopY),
-        Paint()
-          ..color = licht
-          ..strokeWidth = loopDikte
-          ..strokeCap = StrokeCap.round,
-      );
+    switch (t.type) {
+      case TorenType.ijs:
+        // Kristal-bol die zacht knippert.
+        final knipoog = (math.sin(t.animTijd * 3) + 1) / 2;
+        canvas.drawCircle(
+          Offset(torenCx, torenCy - 2),
+          torenR * 0.48,
+          Paint()
+            ..color = Color.lerp(const Color(0xFFB3E5FC), Colors.white, knipoog * 0.5)!,
+        );
+      case TorenType.bliksem:
+        // Tesla-coil: bol + fonkelende vonken.
+        canvas.drawCircle(
+          Offset(torenCx, torenCy - 2),
+          torenR * 0.42,
+          Paint()..color = const Color(0xFFFFF59D),
+        );
+        for (var i = 0; i < 3; i++) {
+          final hoek = t.animTijd * 5 + i * 2.1;
+          canvas.drawLine(
+            Offset(torenCx, torenCy - 2),
+            Offset(
+              torenCx + math.cos(hoek) * torenR * 0.9,
+              torenCy - 2 + math.sin(hoek) * torenR * 0.9,
+            ),
+            Paint()
+              ..color = Colors.yellowAccent.withValues(alpha: 0.75)
+              ..strokeWidth = 1.4,
+          );
+        }
+      case TorenType.gif:
+        // Braakbol met bobbeltjes.
+        canvas.drawCircle(
+          Offset(torenCx, torenCy - 2),
+          torenR * 0.42,
+          Paint()..color = const Color(0xFF9CCC65),
+        );
+        for (var i = 0; i < 3; i++) {
+          canvas.drawCircle(
+            Offset(torenCx - torenR * 0.2 + i * torenR * 0.2, torenCy - 4 - (i % 2) * 3),
+            2.0,
+            Paint()..color = const Color(0xFF558B2F),
+          );
+        }
+      default:
+        canvas.drawLine(
+          Offset(torenCx, torenCy),
+          Offset(loopX, loopY),
+          Paint()
+            ..color = donker
+            ..strokeWidth = loopDikte * 1.7
+            ..strokeCap = StrokeCap.round,
+        );
+        canvas.drawLine(
+          Offset(torenCx, torenCy),
+          Offset(loopX, loopY),
+          Paint()
+            ..color = licht
+            ..strokeWidth = loopDikte
+            ..strokeCap = StrokeCap.round,
+        );
     }
 
     // Muzzle-flits.
@@ -425,6 +466,8 @@ class GamePainter extends CustomPainter {
       TorenType.kanon => const Color(0xFFFFCA28),
       TorenType.ijs => const Color(0xFF4DD0E1),
       TorenType.sniper => const Color(0xFFB388FF),
+      TorenType.bliksem => const Color(0xFFFFFF00),
+      TorenType.gif => const Color(0xFF8BC34A),
     };
 
     // Bewegingssliert.
@@ -447,7 +490,7 @@ class GamePainter extends CustomPainter {
 
   // ---------------- vijand ----------------
   void _tekenVijand(Canvas canvas, Vijand v, double cw, double ch) {
-    final (px, py) = positieOpPad(v.afstand);
+    final (px, py) = positieOpPad(state.pad, v.afstand);
     final cx = px * cw;
     final cy = py * ch;
 
@@ -469,6 +512,7 @@ class GamePainter extends CustomPainter {
       VijandType.tank => cw * 0.3,
       VijandType.normaal => cw * 0.24,
       VijandType.snel => cw * 0.19,
+      VijandType.boss => cw * 0.44,
     };
 
     // Ijs-halo.
@@ -482,15 +526,29 @@ class GamePainter extends CustomPainter {
       }
     }
 
+    // Gif-bellen (drijven op met een vaste tijd-basis zodat ze niet flikkeren).
+    if (v.gifTijd > 0) {
+      for (var i = 0; i < 2; i++) {
+        final bubbelH = (v.fase * 0.25 + i * 0.5) % 1.0;
+        canvas.drawCircle(
+          Offset(cx + (i == 0 ? -hoofdR * 0.5 : hoofdR * 0.4), cy2 - bubbelH * hoofdR * 1.6),
+          2.0 + i,
+          Paint()..color = const Color(0xFF8BC34A).withValues(alpha: 0.6 - bubbelH * 0.4),
+        );
+      }
+    }
+
     final lichaam = switch (v.type) {
       VijandType.normaal => const Color(0xFFD84343),
       VijandType.snel => const Color(0xFFF5B93C),
       VijandType.tank => const Color(0xFF7E57C2),
+      VijandType.boss => const Color(0xFF2B2B2B),
     };
     final lichaamDonker = switch (v.type) {
       VijandType.normaal => const Color(0xFFA63333),
       VijandType.snel => const Color(0xFFC08A28),
       VijandType.tank => const Color(0xFF5E4099),
+      VijandType.boss => const Color(0xFF171717),
     };
 
     if (v.type == VijandType.tank) {
@@ -516,6 +574,47 @@ class GamePainter extends CustomPainter {
         ),
         Paint()..color = lichaamDonker,
       );
+    } else if (v.type == VijandType.boss) {
+      // Boss: grote gepantserde romp met spijkers + rode kroon.
+      final romp = RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(cx, cy2),
+          width: hoofdR * 1.7,
+          height: hoofdR * 1.55,
+        ),
+        const Radius.circular(9),
+      );
+      canvas.drawRRect(romp, Paint()..color = lichaamDonker);
+      canvas.drawRRect(romp.deflate(2.6), Paint()..color = lichaam);
+      // Spijker-platen.
+      for (var i = 0; i < 4; i++) {
+        final spx = cx + (i % 2 == 0 ? -1.0 : 1.0) * hoofdR * 0.45;
+        final spy = cy2 + (i < 2 ? -1.0 : 1.0) * hoofdR * 0.4;
+        canvas.drawCircle(Offset(spx, spy), hoofdR * 0.1, Paint()..color = const Color(0xFF757575));
+      }
+      // Rode ogen (kwade blik).
+      canvas.drawCircle(Offset(cx - hoofdR * 0.26, cy2 - hoofdR * 0.1), hoofdR * 0.13,
+          Paint()..color = const Color(0xFFFF5252));
+      canvas.drawCircle(Offset(cx + hoofdR * 0.26, cy2 - hoofdR * 0.1), hoofdR * 0.13,
+          Paint()..color = const Color(0xFFFF5252));
+      canvas.drawCircle(Offset(cx - hoofdR * 0.26, cy2 - hoofdR * 0.1), hoofdR * 0.06,
+          Paint()..color = Colors.black);
+      canvas.drawCircle(Offset(cx + hoofdR * 0.26, cy2 - hoofdR * 0.1), hoofdR * 0.06,
+          Paint()..color = Colors.black);
+      // Kroon.
+      final kroon = Path()
+        ..moveTo(cx - hoofdR * 0.4, cy2 - hoofdR * 0.75)
+        ..lineTo(cx - hoofdR * 0.4, cy2 - hoofdR * 1.1)
+        ..lineTo(cx - hoofdR * 0.2, cy2 - hoofdR * 0.9)
+        ..lineTo(cx, cy2 - hoofdR * 1.15)
+        ..lineTo(cx + hoofdR * 0.2, cy2 - hoofdR * 0.9)
+        ..lineTo(cx + hoofdR * 0.4, cy2 - hoofdR * 1.1)
+        ..lineTo(cx + hoofdR * 0.4, cy2 - hoofdR * 0.75)
+        ..close();
+      canvas.drawPath(kroon, Paint()..color = const Color(0xFFFFD700));
+      // Boss HP-balk (breder!) en dan klaar.
+      _tekenHpBalk(canvas, v, cx, cy2, hoofdR, ch, breedteMult: 1.4);
+      return; // boss heeft geen standaard-gezichtje nodig — eigen look
     } else {
       canvas.drawCircle(Offset(cx, cy2), hoofdR, Paint()..color = lichaamDonker);
       canvas.drawCircle(Offset(cx, cy2), hoofdR - 1.8, Paint()..color = lichaam);
@@ -563,8 +662,20 @@ class GamePainter extends CustomPainter {
     }
 
     // HP-balkje.
+    _tekenHpBalk(canvas, v, cx, cy2, hoofdR, ch);
+  }
+
+  void _tekenHpBalk(
+    Canvas canvas,
+    Vijand v,
+    double cx,
+    double cy2,
+    double hoofdR,
+    double ch, {
+    double breedteMult = 1.0,
+  }) {
     final hpFrac = (v.hp / v.hpMax).clamp(0.0, 1.0);
-    final balkBreedte = hoofdR * 2.6;
+    final balkBreedte = hoofdR * 2.6 * breedteMult;
     final balkY = cy2 - hoofdR - ch * 0.16;
     canvas.drawRRect(
       RRect.fromRectAndRadius(
@@ -592,8 +703,8 @@ class GamePainter extends CustomPainter {
 
   (double, double) _bewegingsRichting(Vijand v) {
     const epsilon = 0.05;
-    final (x1, y1) = positieOpPad(math.max(0.0, v.afstand - epsilon));
-    final (x2, y2) = positieOpPad(v.afstand + epsilon);
+    final (x1, y1) = positieOpPad(state.pad, math.max(0.0, v.afstand - epsilon));
+    final (x2, y2) = positieOpPad(state.pad, v.afstand + epsilon);
     final dx = x2 - x1;
     final dy = y2 - y1;
     final len = math.sqrt(dx * dx + dy * dy);

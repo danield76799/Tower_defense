@@ -8,6 +8,9 @@ import 'game/entities.dart';
 import 'game/game_config.dart';
 import 'game/game_painter.dart';
 import 'game/game_state.dart';
+import 'game/levels.dart';
+import 'services/sound_service.dart';
+import 'services/progress_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,13 +35,164 @@ class TowerDefenseApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
       ),
-      home: const GameScreen(),
+      home: const LevelSelectScreen(),
     );
   }
 }
 
+// ====================================================================
+// LEVEL-SELECTIE (fase 8: menu met kaarten, sterren, highscores)
+// ====================================================================
+class LevelSelectScreen extends StatefulWidget {
+  const LevelSelectScreen({super.key});
+
+  @override
+  State<LevelSelectScreen> createState() => _LevelSelectScreenState();
+}
+
+class _LevelSelectScreenState extends State<LevelSelectScreen> {
+  Map<String, LevelVoortgang>? _voortgang;
+
+  @override
+  void initState() {
+    super.initState();
+    ProgressService.laad().then((v) => setState(() => _voortgang = v));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF2E7D5B), Color(0xFF1B4D36)],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  '⚔️ TOWER DEFENSE',
+                  style: TextStyle(
+                    fontSize: 30,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFFFFD54F),
+                    letterSpacing: 1.4,
+                    shadows: [Shadow(color: Colors.black54, blurRadius: 6, offset: Offset(0, 3))],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text('Kies een kaart',
+                    style: TextStyle(fontSize: 15, color: Colors.white70)),
+                const SizedBox(height: 18),
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 16,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    for (final lvl in alleLevels)
+                      _LevelKaart(
+                        config: lvl,
+                        voortgang: _voortgang?[lvl.id],
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => GameScreen(levelConfig: lvl),
+                            ),
+                          ).then((_) {
+                            ProgressService.laad()
+                                .then((v) => setState(() => _voortgang = v));
+                          });
+                        },
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LevelKaart extends StatelessWidget {
+  final LevelConfig config;
+  final LevelVoortgang? voortgang;
+  final VoidCallback onTap;
+
+  const _LevelKaart({required this.config, this.voortgang, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final v = voortgang;
+    final sterren = v?.sterren ?? 0;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          width: 210,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF8D6E63), Color(0xFF5D4037)],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFFFD54F), width: 2.5),
+            boxShadow: const [
+              BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 4)),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(config.naam,
+                  style: const TextStyle(
+                      fontSize: 17, fontWeight: FontWeight.w900, color: Colors.white)),
+              const SizedBox(height: 4),
+              Text('${config.totaalGolven} golven • start ⛁${config.startGeld}',
+                  style: const TextStyle(fontSize: 12, color: Colors.white70)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  for (var i = 0; i < 3; i++)
+                    Icon(
+                      i < sterren ? Icons.star : Icons.star_border,
+                      color: i < sterren ? const Color(0xFFFFD700) : Colors.white24,
+                      size: 23,
+                    ),
+                  const Spacer(),
+                  Text(
+                    v?.highscore != null ? '🏆 ${v!.highscore}' : '',
+                    style: const TextStyle(fontSize: 13, color: Color(0xFFFFD54F)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ====================================================================
+// GAME-SCREEN
+// ====================================================================
 class GameScreen extends StatefulWidget {
-  const GameScreen({super.key});
+  final LevelConfig levelConfig;
+
+  const GameScreen({super.key, required this.levelConfig});
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -46,37 +200,78 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen>
     with SingleTickerProviderStateMixin {
-  final GameState _state = GameState();
+  late final GameState _state;
+  final SoundService _sound = SoundService();
 
   late final Ticker _ticker;
   Duration _vorigeTijd = Duration.zero;
 
   (double, double)? _hoverCel;
 
+  bool _geenLevensVerloren = true;
+  bool _eindAfgehandeld = false;
+
   @override
   void initState() {
     super.initState();
+    _state = GameState(levelConfig: widget.levelConfig);
     _ticker = createTicker(_onTick)..start();
   }
 
   void _onTick(Duration elapsed) {
     final dt = ((elapsed - _vorigeTijd).inMicroseconds / 1e6).clamp(0.0, 0.25);
     _vorigeTijd = elapsed;
-    if (dt > 0) {
-      // Sub-stappen van max 33ms: stabiel bij hoge dt (tab-switch e.d.).
+    if (dt > 0 && _state.status == GameStatus.golfLoopt) {
       var rest = dt;
       while (rest > 0) {
         final stap = math.min(rest, 0.033);
+        final levensVoor = _state.levens;
         _state.update(stap);
+        if (_state.levens < levensVoor) {
+          _sound.speel(SoundEffect.levenKwijt);
+          _geenLevensVerloren = false;
+        }
         rest -= stap;
       }
+      _afhandelEindstatus();
     }
     setState(() {});
+  }
+
+  void _afhandelEindstatus() {
+    if (_eindAfgehandeld) return;
+    if (_state.status == GameStatus.gewonnen) {
+      _eindAfgehandeld = true;
+      _sound.speel(SoundEffect.winst);
+      ProgressService.registreerWinst(
+        levelId: widget.levelConfig.id,
+        sterren: berekenSterren(),
+        score: _score(),
+      );
+    } else if (_state.status == GameStatus.verloren) {
+      _eindAfgehandeld = true;
+      _sound.speel(SoundEffect.verlies);
+    }
+  }
+
+  int berekenSterren() {
+    if (_geenLevensVerloren) return 3;
+    if (_state.levens > 15) return 2;
+    return 1;
+  }
+
+  int _score() {
+    var torenWaarde = 0;
+    for (final t in _state.torens) {
+      torenWaarde += t.totaalGeinvesteerd;
+    }
+    return _state.levens * 50 + _state.golfNummer * 100 + torenWaarde ~/ 2;
   }
 
   @override
   void dispose() {
     _ticker.dispose();
+    _sound.sluit();
     super.dispose();
   }
 
@@ -88,7 +283,6 @@ class _GameScreenState extends State<GameScreen>
     );
   }
 
-  // Toren geraakt door tik in cel (cx, cy)?
   Toren? _torenOpCel((double, double) cel) {
     Toren? geraakt;
     for (final t in _state.torens) {
@@ -107,7 +301,9 @@ class _GameScreenState extends State<GameScreen>
         return;
       }
       if (_state.tePlaatsenType != null) {
+        final geldVoor = _state.geld;
         _state.plaatsToren(cel.$1, cel.$2);
+        if (_state.geld < geldVoor) _sound.speel(SoundEffect.plaats);
       } else {
         _state.geselecteerdeToren = null;
       }
@@ -127,7 +323,7 @@ class _GameScreenState extends State<GameScreen>
           builder: (context, constraints) {
             final veldBreedte = constraints.maxWidth;
             var veldHoogte = veldBreedte * GameState.rijen / GameState.kolommen;
-            final maxVeldHoogte = constraints.maxHeight - 150; // ruimte voor HUD
+            final maxVeldHoogte = constraints.maxHeight - 150;
             if (veldHoogte > maxVeldHoogte) veldHoogte = math.max(200.0, maxVeldHoogte);
             final veldSize = Size(veldBreedte, veldHoogte);
 
@@ -163,7 +359,6 @@ class _GameScreenState extends State<GameScreen>
                     _buildBenedenBalk(),
                   ],
                 ),
-                // Toast zwevend boven de onderbalk.
                 if (_state.toast != null)
                   Positioned(
                     bottom: 148,
@@ -171,7 +366,6 @@ class _GameScreenState extends State<GameScreen>
                     right: 0,
                     child: Center(child: _toastChip(_state.toast!)),
                   ),
-                // Win/verlies overlay.
                 if (_state.status == GameStatus.gewonnen ||
                     _state.status == GameStatus.verloren)
                   Positioned.fill(child: _eindOverlay()),
@@ -185,10 +379,10 @@ class _GameScreenState extends State<GameScreen>
 
   // ---- CoC-stijl: hout/goud paneel-decoraties ----
   BoxDecoration get _houtBalk => BoxDecoration(
-        gradient: LinearGradient(
+        gradient: const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [const Color(0xFF8D6E63), const Color(0xFF6D4C41)],
+          colors: [Color(0xFF8D6E63), Color(0xFF6D4C41)],
         ),
         border: Border(
           top: BorderSide(color: const Color(0xFFFFD54F), width: 2.5),
@@ -215,7 +409,7 @@ class _GameScreenState extends State<GameScreen>
   Widget _buildTopBar() {
     final st = _state;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topCenter,
@@ -228,7 +422,11 @@ class _GameScreenState extends State<GameScreen>
       ),
       child: Row(
         children: [
-          // Levens: hart in goud-chip.
+          IconButton(
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.arrow_back, color: Color(0xFFFFD54F)),
+            tooltip: 'Kaarten',
+          ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: _goudChip.copyWith(
@@ -242,21 +440,17 @@ class _GameScreenState extends State<GameScreen>
                 const Icon(Icons.favorite, color: Colors.white, size: 17),
                 Text(' ${st.levens}',
                     style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.white)),
+                        fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white)),
               ],
             ),
           ),
           const SizedBox(width: 10),
-          // Geld: munt-chip.
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: _goudChip,
             child: Row(
               children: [
-                const Icon(Icons.monetization_on,
-                    color: Color(0xFF5D4037), size: 17),
+                const Icon(Icons.monetization_on, color: Color(0xFF5D4037), size: 17),
                 Text(' ${st.geld}',
                     style: const TextStyle(
                         fontSize: 16,
@@ -266,11 +460,24 @@ class _GameScreenState extends State<GameScreen>
             ),
           ),
           const Spacer(),
-          Text('Golf ${st.golfNummer}/${GameBalance.totaalGolven}',
+          // Geluid aan/uit.
+          IconButton(
+            onPressed: () {
+              setState(() {
+                final nu = _sound.muted;
+                _sound.setMuted(!nu);
+                if (_sound.muted == false) _sound.speel(SoundEffect.plaats);
+              });
+            },
+            icon: Icon(
+              _sound.muted ? Icons.volume_off : Icons.volume_up,
+              color: const Color(0xFFFFD54F),
+            ),
+            tooltip: _sound.muted ? 'Geluid aan' : 'Geluid uit',
+          ),
+          Text('Golf ${st.golfNummer}/${st.level.totaalGolven}',
               style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFFFFD54F))),
+                  fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFFFFD54F))),
           const SizedBox(width: 10),
           _statusChip(st.status),
         ],
@@ -310,30 +517,37 @@ class _GameScreenState extends State<GameScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _torenKnop(TorenType.kanon, '💥', GameBalance.kostenKanon),
-              _torenKnop(TorenType.ijs, '❄️', GameBalance.kostenIjs),
-              _torenKnop(TorenType.sniper, '🎯', GameBalance.kostenSniper),
-              const Spacer(),
-              if (st.status == GameStatus.klaarVoorStart ||
-                  st.status == GameStatus.tussenGolven)
-                FilledButton.icon(
-                  onPressed: () => setState(_state.startGolf),
-                  icon: const Icon(Icons.play_arrow),
-                  label: Text('Golf ${st.golfNummer + 1}'),
-                ),
-              if (st.status == GameStatus.gewonnen ||
-                  st.status == GameStatus.verloren)
-                FilledButton.icon(
-                  onPressed: _reset,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Opnieuw'),
-                ),
-            ],
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _torenKnop(TorenType.kanon, '💥', GameBalance.kostenKanon),
+                _torenKnop(TorenType.ijs, '❄️', GameBalance.kostenIjs),
+                _torenKnop(TorenType.sniper, '🎯', GameBalance.kostenSniper),
+                _torenKnop(TorenType.bliksem, '⚡', GameBalance.kostenBliksem),
+                _torenKnop(TorenType.gif, '🧪', GameBalance.kostenGif),
+                const SizedBox(width: 12),
+                if (st.status == GameStatus.klaarVoorStart ||
+                    st.status == GameStatus.tussenGolven)
+                  FilledButton.icon(
+                    onPressed: () {
+                      _sound.speel(SoundEffect.golfStart);
+                      setState(_state.startGolf);
+                    },
+                    icon: const Icon(Icons.play_arrow),
+                    label: Text('Golf ${st.golfNummer + 1}'),
+                  ),
+                if (st.status == GameStatus.gewonnen ||
+                    st.status == GameStatus.verloren)
+                  FilledButton.icon(
+                    onPressed: _reset,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Opnieuw'),
+                  ),
+              ],
+            ),
           ),
-          ?torenPaneel,
+          ?torenPaneel, // null-aware element (Dart 3.8+)
         ],
       ),
     );
@@ -361,7 +575,7 @@ class _GameScreenState extends State<GameScreen>
         HapticFeedback.selectionClick();
       },
       child: Container(
-        width: 84,
+        width: 74,
         padding: const EdgeInsets.symmetric(vertical: 6),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
@@ -386,7 +600,7 @@ class _GameScreenState extends State<GameScreen>
         ),
         child: Column(
           children: [
-            Text(emoji, style: const TextStyle(fontSize: 21)),
+            Text(emoji, style: const TextStyle(fontSize: 20)),
             Text(
               '$kosten',
               style: TextStyle(
@@ -425,6 +639,8 @@ class _GameScreenState extends State<GameScreen>
       TorenType.kanon => '💥',
       TorenType.ijs => '❄️',
       TorenType.sniper => '🎯',
+      TorenType.bliksem => '⚡',
+      TorenType.gif => '🧪',
     };
     return Container(
       margin: const EdgeInsets.only(top: 6),
@@ -444,14 +660,17 @@ class _GameScreenState extends State<GameScreen>
           const SizedBox(width: 10),
           Text(
             'schade ${stats.schade.toInt()} • bereik ${stats.bereik.toStringAsFixed(1)}'
-            '${stats.vertragingPerTref != null ? ' • traag ❄️' : ''}',
+            '${stats.vertragingPerTref != null && stats.vertragingPerTref! > 0 ? ' • traag ❄️' : ''}',
             style: const TextStyle(fontSize: 12),
           ),
           const SizedBox(width: 12),
           if (!maxLevel)
             FilledButton.tonal(
               onPressed: upgradeKosten <= _state.geld
-                  ? () => setState(() => _state.upgradeToren(t))
+                  ? () {
+                      _sound.speel(SoundEffect.upgrade);
+                      setState(() => _state.upgradeToren(t));
+                    }
                   : null,
               child: Text('↑ L${t.level + 1} ($upgradeKosten)'),
             )
@@ -475,6 +694,7 @@ class _GameScreenState extends State<GameScreen>
 
   Widget _eindOverlay() {
     final gewonnen = _state.status == GameStatus.gewonnen;
+    final sterren = gewonnen ? berekenSterren() : 0;
     return Container(
       color: Colors.black.withValues(alpha: 0.72),
       child: Center(
@@ -487,16 +707,41 @@ class _GameScreenState extends State<GameScreen>
               gewonnen ? 'Gewonnen!' : 'Verloren…',
               style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 4),
+            if (gewonnen) ...[
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < 3; i++)
+                    Icon(
+                      i < sterren ? Icons.star : Icons.star_border,
+                      color: i < sterren ? const Color(0xFFFFD700) : Colors.white24,
+                      size: 34,
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 6),
             Text(
-              'Golf ${_state.golfNummer}/${GameBalance.totaalGolven} • '
-              '${_state.torens.length} torens • ${_state.levens} levens over',
+              'Score ${_score()} • Golf ${_state.golfNummer}/${widget.levelConfig.totaalGolven} '
+              '• ${_state.levens} levens over',
             ),
             const SizedBox(height: 14),
-            FilledButton.icon(
-              onPressed: _reset,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Opnieuw spelen'),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FilledButton.icon(
+                  onPressed: _reset,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Opnieuw'),
+                ),
+                const SizedBox(width: 10),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.menu),
+                  label: const Text('Kaarten'),
+                ),
+              ],
             ),
           ],
         ),
@@ -507,8 +752,8 @@ class _GameScreenState extends State<GameScreen>
   void _reset() {
     setState(() {
       _state
-        ..geld = GameBalance.startGeld
-        ..levens = GameBalance.startLevens
+        ..geld = widget.levelConfig.startGeld
+        ..levens = widget.levelConfig.startLevens
         ..golfNummer = 0
         ..status = GameStatus.klaarVoorStart
         ..geselecteerdeToren = null
@@ -516,6 +761,8 @@ class _GameScreenState extends State<GameScreen>
       _state.vijanden.clear();
       _state.torens.clear();
       _state.projectielen.clear();
+      _geenLevensVerloren = true;
+      _eindAfgehandeld = false;
     });
   }
 }

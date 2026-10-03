@@ -3,24 +3,26 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tower_defense/game/entities.dart';
 import 'package:tower_defense/game/game_config.dart';
 import 'package:tower_defense/game/game_state.dart';
+import 'package:tower_defense/game/levels.dart';
 
 void main() {
   group('Pad', () {
     test('totale padlengte is positief en consistent', () {
-      final lengte = padTotaleLengte();
+      final lengte = padTotaleLengte(levelGroeneVallei.pad);
       expect(lengte, greaterThan(30));
     });
 
     test('positieOpPad bij afstand 0 is de eerste marker', () {
-      final (x, y) = positieOpPad(0.0);
-      expect(x, closeTo(levelPad.first.$1, 0.01));
-      expect(y, closeTo(levelPad.first.$2, 0.01));
+      final (x, y) = positieOpPad(levelGroeneVallei.pad, 0.0);
+      expect(x, closeTo(levelGroeneVallei.pad.first.$1, 0.01));
+      expect(y, closeTo(levelGroeneVallei.pad.first.$2, 0.01));
     });
 
     test('positieOpPad voorbij einde geeft laatste punt', () {
-      final (x, y) = positieOpPad(padTotaleLengte() + 100);
-      expect(x, closeTo(levelPad.last.$1, 0.01));
-      expect(y, closeTo(levelPad.last.$2, 0.01));
+      final (x, y) = positieOpPad(
+          levelGroeneVallei.pad, padTotaleLengte(levelGroeneVallei.pad) + 100);
+      expect(x, closeTo(levelGroeneVallei.pad.last.$1, 0.01));
+      expect(y, closeTo(levelGroeneVallei.pad.last.$2, 0.01));
     });
   });
 

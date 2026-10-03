@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'entities.dart';
 import 'game_config.dart';
+import 'levels.dart';
 
 /// Game-status.
 enum GameStatus { klaarVoorStart, golfLoopt, tussenGolven, gewonnen, verloren }
@@ -9,8 +10,11 @@ enum GameStatus { klaarVoorStart, golfLoopt, tussenGolven, gewonnen, verloren }
 /// De volledige game-state en -logica. Geen Flutter-imports: puur Dart,
 /// zodat de hele game te unit-testen is.
 class GameState {
-  int geld = GameBalance.startGeld;
-  int levens = GameBalance.startLevens;
+  /// De actieve kaart (bepaalt pad, economie, aantal golven).
+  LevelConfig level;
+
+  int geld;
+  int levens;
   int golfNummer = 0;
 
   GameStatus status = GameStatus.klaarVoorStart;
@@ -23,22 +27,31 @@ class GameState {
   double _golfTijd = 0;
   double _spawnIndex = 0;
 
-  /// Geselecteerde toren voor plaatsing (uit de HUD) ofInspectie (op veld).
+  /// Geselecteerde toren voor plaatsing (uit de HUD) of inspectie (op veld).
   TorenType? tePlaatsenType;
   Toren? geselecteerdeToren;
 
   /// Laatste melding voor de UI (bv. "Niet genoeg geld").
   String? toast;
 
+  GameState({LevelConfig? levelConfig})
+      : level = levelConfig ?? levelGroeneVallei,
+        geld = (levelConfig ?? levelGroeneVallei).startGeld,
+        levens = (levelConfig ?? levelGroeneVallei).startLevens;
+
   /// Cel-sizes: het veld is 16 x 9 cellen.
   static const double kolommen = 16;
   static const double rijen = 9;
 
+  /// Het pad van de actieve kaart.
+  List<(double, double)> get pad => level.pad;
+
   bool isPadCel(double cx, double cy) {
     // Een cel is 'pad' als zijn middelpunt binnen 0.75 cel van een padsegment ligt.
-    for (var i = 0; i < levelPad.length - 1; i++) {
-      final (x1, y1) = levelPad[i];
-      final (x2, y2) = levelPad[i + 1];
+    final p = pad;
+    for (var i = 0; i < p.length - 1; i++) {
+      final (x1, y1) = p[i];
+      final (x2, y2) = p[i + 1];
       final d = _afstandTotSegment(cx, cy, x1, y1, x2, y2);
       if (d < 0.75) return true;
     }
@@ -57,6 +70,8 @@ class GameState {
       TorenType.kanon => geld >= GameBalance.kostenKanon,
       TorenType.ijs => geld >= GameBalance.kostenIjs,
       TorenType.sniper => geld >= GameBalance.kostenSniper,
+      TorenType.bliksem => geld >= GameBalance.kostenBliksem,
+      TorenType.gif => geld >= GameBalance.kostenGif,
     };
   }
 
@@ -97,7 +112,7 @@ class GameState {
   void startGolf() {
     if (status != GameStatus.klaarVoorStart && status != GameStatus.tussenGolven) return;
     golfNummer++;
-    _huidigeGolf = Golf.bouw(golfNummer);
+    _huidigeGolf = Golf.bouw(golfNummer, totaalGolven: level.totaalGolven);
     _golfTijd = 0;
     _spawnIndex = 0;
     status = GameStatus.golfLoopt;
@@ -122,7 +137,7 @@ class GameState {
       }
 
       // Vijanden lopen.
-      final padLengte = padTotaleLengte();
+      final padLengte = padTotaleLengte(pad);
       for (final v in vijanden) {
         v.update(dt);
         if (!v.ontsnapt && v.afstand >= padLengte) {
@@ -141,7 +156,7 @@ class GameState {
           final stats = t.stats;
           final doel = _zoekDoel(t);
           if (doel != null) {
-            final (vx, vy) = positieOpPad(doel.afstand);
+            final (vx, vy) = positieOpPad(pad, doel.afstand);
             t.loopRichting = math.atan2(vy - t.y, vx - t.x);
             t.schietFlits = 1;
             projectielen.add(Projectiel(
@@ -150,6 +165,7 @@ class GameState {
               schade: stats.schade,
               snelheid: stats.projectileSnelheid,
               vertragingPerTref: stats.vertragingPerTref,
+              pad: pad,
               x: t.x,
               y: t.y,
             ));
@@ -175,7 +191,7 @@ class GameState {
 
       // Golf klaar?
       if (_spawnIndex >= spawns.length && vijanden.isEmpty) {
-        if (golfNummer >= GameBalance.totaalGolven) {
+        if (golfNummer >= level.totaalGolven) {
           status = GameStatus.gewonnen;
         } else {
           status = GameStatus.tussenGolven;
@@ -196,7 +212,7 @@ class GameState {
     Vijand? beste;
     for (final v in vijanden) {
       if (v.isDood) continue;
-      final (vx, vy) = positieOpPad(v.afstand);
+      final (vx, vy) = positieOpPad(pad, v.afstand);
       final dx = vx - t.x;
       final dy = vy - t.y;
       if (math.sqrt(dx * dx + dy * dy) <= stats.bereik) {
