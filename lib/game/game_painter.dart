@@ -1,870 +1,802 @@
+import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flame/components.dart';
+import 'package:flame/flame.dart';
+import 'package:flame/game.dart';
+import 'package:flame/input.dart';
+import 'package:flame/sprite.dart';
 import 'package:flutter/material.dart';
 
-import 'entities.dart';
-import 'game_config.dart';
-import 'game_state.dart';
+import '../game/entities.dart';
+import '../game/game_config.dart';
+import '../game/game_state.dart';
+import '../game/levels.dart';
 
-/// Tekent het veld in Bloons TD-cartoonstijl:
-/// - gras + zandpad (zoals eerder)
-/// - bloons als glanzende ballonnen met lagen (zebra/regenboog/keramiek apart)
-/// - MOAB als blimp met vinnen + HP-balk
-/// - torens als monkeys met type-hoofdband (dart/tack/ijs/gif/bom/sniper/bliksem)
-/// - projectielen: darts, spijkers, bommen, zigzag-bliksem
-class GamePainter extends CustomPainter {
+class GamePainter extends FlameGame with HasTappables {
   final GameState state;
-  final (double, double)? hoverCel;
+  final Function(TorenType) onTorenGeselecteerd;
+  final VoidCallback onUpgrade;
+  final VoidCallback onVerkoop;
+  final VoidCallback onStartGolf;
+  final VoidCallback onTerugNaarMenu;
+  final VoidCallback onToggleModifiers;
+  final VoidCallback onToggleGeluid;
 
-  GamePainter(this.state, this.hoverCel);
+  bool geluidAan = true;
+  final GameState state;
 
-  // Vaste pseudo-random-volgorde zodat decoraties NIET flikkeren per frame.
-  static final _rng = math.Random(42);
-  static final _decoratie = List.generate(90, (_) => (
-    _rng.nextDouble() * GameState.kolommen,
-    _rng.nextDouble() * GameState.rijen,
-    _rng.nextDouble(),
-  ));
+  late final AudioPlayer _audioPlayer;
 
-  static const _regenboogKleuren = [
-    Color(0xFFE53935), Color(0xFFFB8C00), Color(0xFFFDD835),
-    Color(0xFF43A047), Color(0xFF1E88E5), Color(0xFF8E24AA),
-  ];
+  // Sprites
+  late final Map<TorenType, Sprite> torenSprites;
+  late final Map<String, Sprite> bloonSprites;
+  late final Map<TorenType, Sprite> projectielSprites;
+  late final Map<String, Sprite> padSprites;
+  late final Map<String, ui.Image> achtergrondImages;
+
+  // Animaties
+  late final SpriteAnimationComponent regeneratieAnimatie;
+  late final SpriteAnimationComponent explosieAnimatie;
+
+  // Thema's
+  final Map<String, String> levelThema = {
+    'vallei': 'dirt',
+    'kronkel': 'grass',
+    'slang': 'sand',
+  };
+
+  GamePainter({
+    required this.state,
+    required this.onTorenGeselecteerd,
+    required this.onUpgrade,
+    required this.onVerkoop,
+    required this.onStartGolf,
+    required this.onTerugNaarMenu,
+    required this.onToggleModifiers,
+    required this.onToggleGeluid,
+  }) : super() {
+    _audioPlayer = AudioPlayer();
+  }
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final cw = size.width / GameState.kolommen;
-    final ch = size.height / GameState.rijen;
+  Future<void> onLoad() async {
+    await super.onLoad();
 
-    _tekenGras(canvas, size, cw, ch);
-    _tekenPad(canvas, cw, ch);
-    _tekenSpawnExit(canvas, cw, ch);
+    // Laad alle sprites
+    torenSprites = {
+      for (final type in TorenType.values)
+        type: await _loadSprite('assets/images/torens/toren_${type.name}_v2.png'),
+    };
 
-    for (final t in state.torens) {
-      _tekenToren(canvas, t, cw, ch);
-    }
+    bloonSprites = {
+      for (final type in BloonType.values)
+        type.name: await _loadSprite('assets/images/bloons/bloon_${type.name}.png'),
+      'moab': await _loadSprite('assets/images/bloons/bloon_moab.png'),
+      'bfb': await _loadSprite('assets/images/bloons/bloon_bfb.png'),
+      'zomg': await _loadSprite('assets/images/bloons/bloon_zomg.png'),
+      'bad': await _loadSprite('assets/images/bloons/bloon_bad.png'),
+    };
 
-    if (state.geselecteerdeToren == null &&
-        state.tePlaatsenType != null &&
-        hoverCel != null) {
-      _tekenPlaatsPreview(canvas, cw, ch);
-    }
+    projectielSprites = {
+      for (final type in TorenType.values)
+        type: await _loadSprite('assets/images/projectielen/projectiel_${type.name}.png'),
+    };
 
-    for (final p in state.projectielen) {
-      _tekenProjectiel(canvas, p, cw, ch);
-    }
+    padSprites = {
+      for (final thema in ['dirt', 'grass', 'sand', 'snow', 'lava'])
+        thema: await _loadSprite('assets/images/pad/pad_$thema.png'),
+    };
 
-    for (final v in state.vijanden) {
-      _tekenBloon(canvas, v, cw, ch);
-    }
-  }
+    achtergrondImages = {
+      for (final level in alleLevels)
+        level.id: await _loadImage('assets/images/achtergronden/achtergrond_${level.id}.jpg'),
+    };
 
-  // ---------------- gras ----------------
-  void _tekenGras(Canvas canvas, Size size, double cw, double ch) {
-    // Basis: fris grasgroen (CoC-achtig, helder).
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = const Color(0xFF63B14E),
-    );
-
-    // Donkerder checkerboard-ruiten.
-    final donker = Paint()..color = const Color(0xFF58A346).withValues(alpha: 0.55);
-    for (var x = 0; x < GameState.kolommen; x++) {
-      for (var y = 0; y < GameState.rijen; y++) {
-        if ((x + y) % 2 == 0) {
-          canvas.drawRect(
-            Rect.fromLTWH(x * cw, y * ch, cw, ch),
-            donker,
-          );
-        }
-      }
-    }
-
-    // Vignette voor diepte (licht boven, donker onder).
-    final vignette = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          Colors.white.withValues(alpha: 0.07),
-          Colors.transparent,
-          Colors.black.withValues(alpha: 0.10),
-        ],
-      ).createShader(Offset.zero & size);
-    canvas.drawRect(Offset.zero & size, vignette);
-
-    // Grasbosjes.
-    final bos = Paint()
-      ..color = const Color(0xFF3D8B33)
-      ..strokeWidth = 1.6
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-    for (final (dx, dy, v) in _decoratie) {
-      final px = dx * cw;
-      final py = dy * ch;
-      if (state.isPadCel(dx, dy)) continue;
-      final h = 3.0 + v * 3.0;
-      canvas.drawLine(Offset(px, py), Offset(px - 2, py - h), bos);
-      canvas.drawLine(Offset(px, py), Offset(px, py - h * 1.25), bos);
-      canvas.drawLine(Offset(px, py), Offset(px + 2, py - h), bos);
-    }
-
-    // Bloemetjes (wit/geel).
-    for (var i = 0; i < _decoratie.length; i += 7) {
-      final (dx, dy, v) = _decoratie[i];
-      if (state.isPadCel(dx, dy)) continue;
-      final px = dx * cw;
-      final py = dy * ch;
-      canvas.drawCircle(
-        Offset(px, py),
-        1.6 + v,
-        Paint()..color = v > 0.5 ? Colors.white : const Color(0xFFFFE082),
-      );
-      canvas.drawCircle(
-        Offset(px, py),
-        0.7,
-        Paint()..color = const Color(0xFFF9A825),
-      );
-    }
-  }
-
-  // ---------------- pad ----------------
-  void _tekenPad(Canvas canvas, double cw, double ch) {
-    final path = Path();
-    var first = true;
-    for (final (x, y) in state.pad) {
-      final px = x * cw;
-      final py = y * ch;
-      if (first) {
-        path.moveTo(px, py);
-        first = false;
-      } else {
-        path.lineTo(px, py);
-      }
-    }
-
-    // Donkerbruine rand.
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = const Color(0xFF8A6844)
-        ..strokeWidth = cw * 0.82
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round,
-    );
-    // Zandbaan.
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = const Color(0xFFD9B779)
-        ..strokeWidth = cw * 0.7
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round,
-    );
-    // Lichte middenstreep.
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = const Color(0xFFE8CE92).withValues(alpha: 0.5)
-        ..strokeWidth = cw * 0.34
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round,
-    );
-
-    // Steentjes.
-    final steen = Paint()..color = const Color(0xFFB39B6B);
-    final steenDonker = Paint()..color = const Color(0xFF9C8558);
-    var i = 0;
-    for (var seg = 0; seg < state.pad.length - 1; seg++) {
-      final (x1, y1) = state.pad[seg];
-      final (x2, y2) = state.pad[seg + 1];
-      for (var f = 0.15; f < 1.0; f += 0.22) {
-        i++;
-        final px = (x1 + (x2 - x1) * f) * cw;
-        final py = (y1 + (y2 - y1) * f) * ch + (i % 2 == 0 ? cw * 0.16 : -cw * 0.18);
-        canvas.drawCircle(Offset(px, py), 1.8 + (i % 3), i % 2 == 0 ? steen : steenDonker);
-      }
-    }
-  }
-
-  void _tekenSpawnExit(Canvas canvas, double cw, double ch) {
-    final (sx, sy) = state.pad.first;
-    final (ex, ey) = state.pad.last;
-
-    // Spawn: rood portaal.
-    final sxPx = sx * cw;
-    final syPx = sy * ch;
-    canvas.drawCircle(
-      Offset(sxPx, syPx),
-      cw * 0.42,
-      Paint()..color = Colors.red.withValues(alpha: 0.25),
-    );
-    canvas.drawCircle(Offset(sxPx, syPx), cw * 0.3, Paint()..color = const Color(0xFFB71C1C));
-    canvas.drawCircle(
-      Offset(sxPx, syPx),
-      cw * 0.3,
-      Paint()
-        ..color = Colors.white
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2,
-    );
-    _tekst(canvas, '⚔️', sxPx, syPx, 15);
-
-    // Exit: huisje (basis).
-    final exPx = ex * cw;
-    final eyPx = ey * ch;
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(exPx + 2.5, eyPx + ch * 0.28),
-        width: cw * 0.7,
-        height: ch * 0.3,
+    // Animaties
+    regeneratieAnimatie = SpriteAnimationComponent.fromFrameData(
+      await images.load('assets/images/bloons/bloon_regenboog.png'),
+      SpriteAnimationData.sequenced(
+        amount: 8,
+        stepTime: 0.1,
+        textureSize: Vector2(128, 128),
       ),
-      Paint()..color = Colors.black.withValues(alpha: 0.25),
-    );
-    final muur = Rect.fromLTWH(exPx - cw * 0.34, eyPx - ch * 0.12, cw * 0.68, ch * 0.52);
-    canvas.drawRect(muur, Paint()..color = const Color(0xFFBCAAA4));
-    final dak = Path()
-      ..moveTo(exPx - cw * 0.4, eyPx - ch * 0.1)
-      ..lineTo(exPx, eyPx - ch * 0.45)
-      ..lineTo(exPx + cw * 0.4, eyPx - ch * 0.1)
-      ..close();
-    canvas.drawPath(dak, Paint()..color = const Color(0xFFAD5A45));
-    _tekst(canvas, '🏠', exPx, eyPx + 2, 15);
+    )..anchor = Anchor.center;
+
+    explosieAnimatie = SpriteAnimationComponent.fromFrameData(
+      await images.load('assets/images/projectielen/projectiel_bom.png'),
+      SpriteAnimationData.sequenced(
+        amount: 6,
+        stepTime: 0.08,
+        textureSize: Vector2(128, 128),
+        loop: false,
+      ),
+    )..anchor = Anchor.center;
+
+    add(regeneratieAnimatie);
+    add(explosieAnimatie);
   }
 
-  // ---------------- toren ----------------
-  void _tekenToren(Canvas canvas, Toren t, double cw, double ch) {
-    final cx = t.x * cw;
-    final cy = t.y * ch;
+  Future<Sprite> _loadSprite(String path) async {
+    final image = await images.load(path);
+    return Sprite(image);
+  }
 
+  Future<ui.Image> _loadImage(String path) async {
+    final data = await Flame.assets.readFile(path);
+    final codec = await ui.instantiateImageCodec(Uint8List.fromList(data.codeUnits));
+    final frame = await codec.getNextFrame();
+    return frame.image;
+  }
+
+  void speelGeluid(String pad) {
+    if (!_geluidAan) return;
+    _audioPlayer.play(AssetSource(pad));
+  }
+
+  @override
+  void render(Canvas canvas) {
+    final thema = levelThema[state.levelConfig.id] ?? 'dirt';
+    final achtergrond = achtergrondImages[state.levelConfig.id];
+    if (achtergrond != null) {
+      canvas.drawImageRect(
+        achtergrond,
+        Rect.fromLTWH(0, 0, achtergrond.width.toDouble(), achtergrond.height.toDouble()),
+        Rect.fromLTWH(0, 0, size.x, size.y),
+        Paint(),
+      );
+    }
+
+    // Donkere overlay voor tekstcontrast
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.x, size.y),
+      Paint()..color = Colors.black.withOpacity(0.3),
+    );
+
+    // Pad tekenen
+    _tekenPad(canvas, thema);
+
+    // Torens tekenen
+    for (final t in state.torens) {
+      _tekenToren(canvas, t);
+    }
+
+    // Projectielen tekenen
+    for (final p in state.projectielen) {
+      _tekenProjectiel(canvas, p);
+    }
+
+    // Bloons tekenen
+    for (final v in state.vijanden) {
+      _tekenBloon(canvas, v);
+    }
+
+    // MOABs tekenen
+    for (final m in state.moabs) {
+      _tekenMoab(canvas, m);
+    }
+
+    // UI tekenen
+    _tekenUI(canvas);
+  }
+
+  void _tekenPad(Canvas canvas, String thema) {
+    final padSprite = padSprites[thema];
+    if (padSprite == null) return;
+
+    final pad = state.levelConfig.pad;
+    for (var i = 0; i < pad.length - 1; i++) {
+      final (x1, y1) = pad[i];
+      final (x2, y2) = pad[i + 1];
+      final dx = x2 - x1;
+      final dy = y2 - y1;
+      final afstand = math.sqrt(dx * dx + dy * dy);
+      final stappen = (afstand / 0.3).ceil();
+
+      for (var s = 0; s <= stappen; s++) {
+        final t = s / stappen;
+        final x = x1 + dx * t;
+        final y = y1 + dy * t;
+        padSprite.render(
+          canvas,
+          position: Vector2(x, y),
+          size: Vector2(1.0, 1.0),
+          overridePaint: Paint()..color = Colors.white.withOpacity(0.8),
+        );
+      }
+    }
+  }
+
+  void _tekenToren(Canvas canvas, Toren t) {
+    final sprite = torenSprites[t.type];
+    if (sprite == null) return;
+
+    // Schaduw
+    canvas.drawCircle(
+      Offset(t.x, t.y + 0.2),
+      0.4,
+      Paint()..color = Colors.black.withOpacity(0.3),
+    );
+
+    // Toren-sprite
+    sprite.render(
+      canvas,
+      position: Vector2(t.x, t.y),
+      size: Vector2(1.0, 1.0),
+      overridePaint: Paint()..color = Colors.white,
+    );
+
+    // Level-indicator (sterretjes)
+    for (var i = 0; i < t.level; i++) {
+      final x = t.x - 0.3 + i * 0.2;
+      final y = t.y - 0.4;
+      TextPainter(
+        text: TextSpan(
+          text: '★',
+          style: TextStyle(color: Colors.yellow, fontSize: 12),
+        ),
+        textDirection: TextDirection.ltr,
+      )
+        ..layout()
+        ..paint(canvas, Offset(x, y));
+    }
+
+    // Bereik-cirkel (als geselecteerd)
     if (state.geselecteerdeToren == t) {
       canvas.drawCircle(
-        Offset(cx, cy),
-        cw * 0.55,
+        Offset(t.x, t.y),
+        t.stats.bereik,
         Paint()
-          ..color = Colors.yellow.withValues(alpha: 0.85)
+          ..color = Colors.blue.withOpacity(0.2)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 3.2,
+          ..strokeWidth = 0.05,
       );
-    }
-
-    final bandKleur = switch (t.type) {
-      TorenType.dart => const Color(0xFFB85C4A),
-      TorenType.tack => const Color(0xFFFF7043),
-      TorenType.ijs => const Color(0xFF4FA3D1),
-      TorenType.gif => const Color(0xFF7CB342),
-      TorenType.bom => const Color(0xFF37474F),
-      TorenType.sniper => const Color(0xFF8B6BC7),
-      TorenType.bliksem => const Color(0xFFFFD600),
-    };
-    const donker = Color(0xFF5D4037);
-    const licht = Color(0xFF8D6E63);
-
-    // Grondschaduw.
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(cx + cw * 0.06, cy + ch * 0.3),
-        width: cw * 0.78,
-        height: ch * 0.34,
-      ),
-      Paint()..color = Colors.black.withValues(alpha: 0.28),
-    );
-
-    // Basis/platform.
-    final basis = Rect.fromCenter(
-      center: Offset(cx, cy + ch * 0.1),
-      width: cw * 0.72,
-      height: ch * 0.62,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(basis, const Radius.circular(5)),
-      Paint()..color = donker,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(basis.deflate(2.4), const Radius.circular(4)),
-      Paint()..color = licht,
-    );
-
-    // Monkey-kopje.
-    final torenR = cw * 0.3;
-    final torenCx = cx;
-    final torenCy = cy - ch * 0.05;
-    canvas.drawCircle(Offset(torenCx, torenCy), torenR, Paint()..color = donker);
-    canvas.drawCircle(Offset(torenCx, torenCy), torenR - 2.4, Paint()..color = licht);
-    // Beige bek-strook.
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(torenCx, torenCy + torenR * 0.42),
-        width: torenR * 0.95,
-        height: torenR * 0.55,
-      ),
-      Paint()..color = const Color(0xFFD7CCC8),
-    );
-    // Oogjes.
-    canvas.drawCircle(Offset(torenCx - torenR * 0.32, torenCy - torenR * 0.15),
-        torenR * 0.13, Paint()..color = Colors.white);
-    canvas.drawCircle(Offset(torenCx + torenR * 0.32, torenCy - torenR * 0.15),
-        torenR * 0.13, Paint()..color = Colors.white);
-    canvas.drawCircle(Offset(torenCx - torenR * 0.32, torenCy - torenR * 0.15),
-        torenR * 0.06, Paint()..color = Colors.black);
-    canvas.drawCircle(Offset(torenCx + torenR * 0.32, torenCy - torenR * 0.15),
-        torenR * 0.06, Paint()..color = Colors.black);
-    // Hoofdband in type-kleur.
-    canvas.drawCircle(
-      Offset(torenCx, torenCy),
-      torenR + 1,
-      Paint()
-        ..color = bandKleur
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.4,
-    );
-
-    // Draaiend loopje.
-    final richting = t.loopRichting;
-    final loopLengte = cw * (t.type == TorenType.sniper ? 0.55 : 0.42);
-    final loopDikte = cw * (t.type == TorenType.sniper ? 0.11 : 0.15);
-    final loopX = torenCx + math.cos(richting) * loopLengte;
-    final loopY = torenCy + math.sin(richting) * loopLengte;
-
-    switch (t.type) {
-      case TorenType.ijs:
-        // Kristal-bol die zacht knippert.
-        final knipoog = (math.sin(t.animTijd * 3) + 1) / 2;
-        canvas.drawCircle(
-          Offset(torenCx, torenCy - 2),
-          torenR * 0.48,
-          Paint()
-            ..color = Color.lerp(const Color(0xFFB3E5FC), Colors.white, knipoog * 0.5)!,
-        );
-      case TorenType.bliksem:
-        // Tesla-coil: bol + fonkelende vonken.
-        canvas.drawCircle(
-          Offset(torenCx, torenCy - 2),
-          torenR * 0.42,
-          Paint()..color = const Color(0xFFFFF59D),
-        );
-        for (var i = 0; i < 3; i++) {
-          final hoek = t.animTijd * 5 + i * 2.1;
-          canvas.drawLine(
-            Offset(torenCx, torenCy - 2),
-            Offset(
-              torenCx + math.cos(hoek) * torenR * 0.9,
-              torenCy - 2 + math.sin(hoek) * torenR * 0.9,
-            ),
-            Paint()
-              ..color = Colors.yellowAccent.withValues(alpha: 0.75)
-              ..strokeWidth = 1.4,
-          );
-        }
-      case TorenType.gif:
-        // Gifkolf met bobbeltjes.
-        canvas.drawCircle(
-          Offset(torenCx, torenCy - 2),
-          torenR * 0.42,
-          Paint()..color = const Color(0xFF9CCC65),
-        );
-        for (var i = 0; i < 3; i++) {
-          canvas.drawCircle(
-            Offset(torenCx - torenR * 0.2 + i * torenR * 0.2, torenCy - 4 - (i % 2) * 3),
-            2.0,
-            Paint()..color = const Color(0xFF558B2F),
-          );
-        }
-      case TorenType.tack:
-        // 8 spijkerstompen in een cirkel.
-        for (var i = 0; i < 8; i++) {
-          final hoek = i * math.pi / 4 + t.animTijd * 0.3;
-          canvas.drawLine(
-            Offset(torenCx + math.cos(hoek) * torenR * 0.6,
-                torenCy + math.sin(hoek) * torenR * 0.6),
-            Offset(torenCx + math.cos(hoek) * torenR * 1.0,
-                torenCy + math.sin(hoek) * torenR * 1.0),
-            Paint()
-              ..color = const Color(0xFFFF8A65)
-              ..strokeWidth = 2.6
-              ..strokeCap = StrokeCap.round,
-          );
-        }
-      case TorenType.bom:
-        // Zwarte bom-bal.
-        canvas.drawCircle(Offset(loopX, loopY), cw * 0.13, Paint()..color = const Color(0xFF263238));
-        canvas.drawCircle(
-          Offset(loopX - cw * 0.04, loopY - cw * 0.04),
-          cw * 0.04,
-          Paint()..color = Colors.white.withValues(alpha: 0.5),
-        );
-      default:
-        canvas.drawLine(
-          Offset(torenCx, torenCy),
-          Offset(loopX, loopY),
-          Paint()
-            ..color = donker
-            ..strokeWidth = loopDikte * 1.7
-            ..strokeCap = StrokeCap.round,
-        );
-        canvas.drawLine(
-          Offset(torenCx, torenCy),
-          Offset(loopX, loopY),
-          Paint()
-            ..color = bandKleur
-            ..strokeWidth = loopDikte
-            ..strokeCap = StrokeCap.round,
-        );
-    }
-
-    // Muzzle-flits.
-    if (t.schietFlits > 0) {
-      final flitsR = cw * 0.16 * t.schietFlits;
-      canvas.drawCircle(
-        Offset(loopX, loopY),
-        flitsR,
-        Paint()..color = Colors.orange.withValues(alpha: 0.85 * t.schietFlits),
-      );
-      canvas.drawCircle(
-        Offset(loopX, loopY),
-        flitsR * 0.5,
-        Paint()..color = Colors.yellow.withValues(alpha: t.schietFlits),
-      );
-    }
-
-    // Niveau-vlaggetje.
-    final vlagX = cx + cw * 0.3;
-    final vlagY = cy - ch * 0.32;
-    canvas.drawLine(
-      Offset(vlagX, vlagY + ch * 0.16),
-      Offset(vlagX, vlagY - ch * 0.1),
-      Paint()
-        ..color = const Color(0xFF5D4037)
-        ..strokeWidth = 1.6,
-    );
-    canvas.drawPath(
-      Path()
-        ..moveTo(vlagX, vlagY - ch * 0.1)
-        ..lineTo(vlagX + cw * 0.16, vlagY - ch * 0.05)
-        ..lineTo(vlagX, vlagY),
-      Paint()..color = Colors.amber.shade600,
-    );
-
-    // Level-sterren.
-    for (var s = 0; s < t.level; s++) {
-      _ster(canvas, cx - cw * 0.2 + s * cw * 0.2, cy + ch * 0.34, cw * 0.075);
     }
   }
 
-  void _ster(Canvas canvas, double cx, double cy, double r) {
-    final pad = Path();
-    for (var i = 0; i < 5; i++) {
-      final hb = -math.pi / 2 + i * 2 * math.pi / 5;
-      final hi = hb + math.pi / 5;
-      final bx = cx + math.cos(hb) * r;
-      final by = cy + math.sin(hb) * r;
-      final ix = cx + math.cos(hi) * r * 0.45;
-      final iy = cy + math.sin(hi) * r * 0.45;
-      if (i == 0) {
-        pad.moveTo(bx, by);
-      } else {
-        pad.lineTo(bx, by);
+  void _tekenProjectiel(Canvas canvas, Projectiel p) {
+    final sprite = projectielSprites[p.type];
+    if (sprite == null) return;
+
+    // Trail-effect (dart/tack)
+    if (p.type == TorenType.dart || p.type == TorenType.tack) {
+      final trailPaint = Paint()
+        ..color = p.type == TorenType.dart ? Colors.brown : Colors.grey
+        ..strokeWidth = 0.1
+        ..style = PaintingStyle.stroke;
+      canvas.drawLine(
+        Offset(p.vorigeX, p.vorigeY),
+        Offset(p.x, p.y),
+        trailPaint,
+      );
+    }
+
+    // Projectiel-sprite
+    sprite.render(
+      canvas,
+      position: Vector2(p.x, p.y),
+      size: Vector2(0.4, 0.4),
+      overridePaint: Paint()..color = Colors.white,
+    );
+
+    // Explosie (bom)
+    if (p.type == TorenType.bom && p.weg) {
+      explosieAnimatie
+        ..position = Vector2(p.x, p.y)
+        ..size = Vector2(1.2, 1.2)
+        ..update(0);
+      explosieAnimatie.render(canvas);
+      speelGeluid('audio/projectiel_bom_hit.wav');
+    }
+  }
+
+  void _tekenBloon(Canvas canvas, Vijand v) {
+    final sprite = bloonSprites[v.type.name];
+    if (sprite == null) return;
+
+    // Modifier-ringen
+    _tekenModifierRingen(canvas, v);
+
+    // Bloon-sprite
+    sprite.render(
+      canvas,
+      position: Vector2(v.x, v.y),
+      size: Vector2(v.straal * 2, v.straal * 2),
+      overridePaint: Paint()..color = Colors.white,
+    );
+
+    // HP-bar
+    final hpBarWidth = v.straal * 1.8;
+    final hpBarHeight = 0.15;
+    final hpPercentage = v.hp / v.hpMax;
+    canvas.drawRect(
+      Rect.fromLTWH(
+        v.x - hpBarWidth / 2,
+        v.y - v.straal - 0.2,
+        hpBarWidth,
+        hpBarHeight,
+      ),
+      Paint()..color = Colors.black.withOpacity(0.5),
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(
+        v.x - hpBarWidth / 2,
+        v.y - v.straal - 0.2,
+        hpBarWidth * hpPercentage,
+        hpBarHeight,
+      ),
+      Paint()..color = _kleurVoorBloon(v),
+    );
+
+    // Regen-animatie (als regenererend)
+    if (v.heeft(GolfModifier.regenererend) && v.hp < v.hpMax) {
+      regeneratieAnimatie
+        ..position = Vector2(v.x, v.y)
+        ..size = Vector2(v.straal * 2.2, v.straal * 2.2)
+        ..update(0); // Forceer frame-update
+      regeneratieAnimatie.render(canvas);
+    }
+
+    // Pop-geluid
+    if (v.weg) {
+      speelGeluid('audio/bloon_${v.type.name}_pop.wav');
+    }
+  }
+
+  void _tekenMoab(Canvas canvas, Moab m) {
+    final sprite = bloonSprites[m.type.name];
+    if (sprite == null) return;
+
+    // Modifier-ringen
+    _tekenModifierRingen(canvas, m);
+
+    // MOAB-sprite
+    sprite.render(
+      canvas,
+      position: Vector2(m.x, m.y),
+      size: Vector2(m.straal * 2, m.straal * 2),
+      overridePaint: Paint()..color = Colors.white,
+    );
+
+    // HP-bar
+    final hpBarWidth = m.straal * 1.8;
+    final hpBarHeight = 0.2;
+    final hpPercentage = m.hp / m.hpMax;
+    canvas.drawRect(
+      Rect.fromLTWH(
+        m.x - hpBarWidth / 2,
+        m.y - m.straal - 0.3,
+        hpBarWidth,
+        hpBarHeight,
+      ),
+      Paint()..color = Colors.black.withOpacity(0.5),
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(
+        m.x - hpBarWidth / 2,
+        m.y - m.straal - 0.3,
+        hpBarWidth * hpPercentage,
+        hpBarHeight,
+      ),
+      Paint()..color = _kleurVoorMoab(m),
+    );
+  }
+
+  void _tekenModifierRingen(Canvas canvas, dynamic vijand) {
+    final modifiers = vijand is Vijand ? vijand.modifiers : vijand.modifiers;
+    if (modifiers.isEmpty) return;
+
+    final center = Offset(vijand.x, vijand.y);
+    final straal = vijand.straal + 0.1;
+
+    for (final modifier in modifiers) {
+      final kleur = modifier.kleur.withOpacity(0.6);
+      canvas.drawCircle(
+        center,
+        straal + 0.05 * modifiers.indexOf(modifier),
+        Paint()
+          ..color = kleur
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.08,
+      );
+    }
+  }
+
+  Color _kleurVoorBloon(Vijand v) {
+    if (v.heeft(GolfModifier.gepantserd)) return Colors.grey;
+    if (v.heeft(GolfModifier.magischSchild)) return Colors.purple;
+    return v.type.kleur;
+  }
+
+  Color _kleurVoorMoab(Moab m) {
+    if (m.heeft(GolfModifier.gepantserd)) return Colors.grey[800]!;
+    if (m.heeft(GolfModifier.magischSchild)) return Colors.purple[800]!;
+    return Colors.blueGrey;
+  }
+
+  void _tekenUI(Canvas canvas) {
+    final textStyle = TextStyle(color: Colors.white, fontSize: 16);
+    final textPainter = TextPainter(textDirection: TextDirection.ltr);
+
+    // Geld
+    textPainter.text = TextSpan(text: '€${state.geld}', style: textStyle);
+    textPainter.layout();
+    textPainter.paint(canvas, Offset(10, 10));
+
+    // Levens
+    textPainter.text = TextSpan(text: '❤️${state.levens}', style: textStyle);
+    textPainter.layout();
+    textPainter.paint(canvas, Offset(size.x - 100, 10));
+
+    // Golf
+    textPainter.text = TextSpan(
+      text: 'Golf ${state.golfNummer}/${state.levelConfig.totaalGolven}',
+      style: textStyle,
+    );
+    textPainter.layout();
+    textPainter.paint(canvas, Offset(size.x / 2 - 70, 10));
+
+    // Modifiers
+    _tekenModifierChips(canvas);
+
+    // Toren-selectie
+    _tekenTorenSelectie(canvas);
+
+    // Actie-buttons
+    _tekenActieButtons(canvas);
+  }
+
+  void _tekenModifierChips(Canvas canvas) {
+    final actieve = state.actieveModifiers;
+    final volgende = state.volgendeModifiers;
+    final textStyle = TextStyle(color: Colors.white, fontSize: 12);
+    final textPainter = TextPainter(textDirection: TextDirection.ltr);
+
+    if (actieve.isNotEmpty) {
+      textPainter.text = TextSpan(text: 'Deze golf:', style: textStyle);
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(10, 50));
+
+      var x = 100;
+      for (final modifier in actieve) {
+        final kleur = modifier.kleur;
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(x.toDouble(), 45, 20, 20),
+            Radius.circular(10),
+          ),
+          Paint()..color = kleur.withOpacity(0.7),
+        );
+        textPainter.text = TextSpan(
+          text: modifier.uitleg,
+          style: textStyle.copyWith(fontSize: 10),
+        );
+        textPainter.layout();
+        textPainter.paint(canvas, Offset(x.toDouble(), 70));
+        x += 25;
       }
-      pad.lineTo(ix, iy);
     }
-    pad.close();
-    canvas.drawPath(pad, Paint()..color = const Color(0xFFFFD54F));
-  }
 
-  void _tekenPlaatsPreview(Canvas canvas, double cw, double ch) {
-    final (cx, cy) = hoverCel!;
-    final type = state.tePlaatsenType!;
-    final stats = TorenStats.van(type, 1);
-    final betaalbaar = state.geld >= stats.basisKosten;
-    final kanHier = state.kanPlaatsen(cx, cy);
-    final ok = betaalbaar && kanHier;
+    if (volgende.isNotEmpty && state.status == GameStatus.pauze) {
+      textPainter.text = TextSpan(text: 'Straks:', style: textStyle);
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(10, 90));
 
-    final kleur = ok ? Colors.green : Colors.red;
-    canvas.drawCircle(
-      Offset(cx * cw, cy * ch),
-      stats.bereik * cw,
-      Paint()..color = kleur.withValues(alpha: 0.14),
-    );
-    canvas.drawCircle(
-      Offset(cx * cw, cy * ch),
-      stats.bereik * cw,
-      Paint()
-        ..color = kleur.withValues(alpha: 0.5)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.6,
-    );
-    // Ghost-toren (half-transparent): teken op saveLayer.
-    canvas.saveLayer(
-      null,
-      Paint()..color = Colors.white.withValues(alpha: 0.62),
-    );
-    _tekenToren(canvas, Toren(type, cx, cy), cw, ch);
-    canvas.restore();
-  }
-
-  // ---------------- projectiel ----------------
-  void _tekenProjectiel(Canvas canvas, Projectiel p, double cw, double ch) {
-    final px = p.x * cw;
-    final py = p.y * ch;
-    final sx = p.vorigeX * cw;
-    final sy = p.vorigeY * ch;
-
-    switch (p.type) {
-      case TorenType.dart:
-        const kleur = Color(0xFFE65100);
-        canvas.drawLine(
-          Offset(sx, sy),
-          Offset(px, py),
-          Paint()
-            ..color = kleur
-            ..strokeWidth = cw * 0.07
-            ..strokeCap = StrokeCap.round,
+      var x = 100;
+      for (final modifier in volgende) {
+        final kleur = modifier.kleur;
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(x.toDouble(), 85, 20, 20),
+            Radius.circular(10),
+          ),
+          Paint()..color = kleur.withOpacity(0.7),
         );
-        canvas.drawCircle(Offset(px, py), cw * 0.055, Paint()..color = kleur);
-      case TorenType.tack:
-        canvas.drawLine(
-          Offset(sx, sy),
-          Offset(px, py),
-          Paint()
-            ..color = const Color(0xFFFF8A65)
-            ..strokeWidth = cw * 0.05
-            ..strokeCap = StrokeCap.round,
-        );
-      case TorenType.bom:
-        canvas.drawCircle(Offset(px, py), cw * 0.11, Paint()..color = const Color(0xFF263238));
-        canvas.drawCircle(
-          Offset(px - cw * 0.035, py - cw * 0.035),
-          cw * 0.035,
-          Paint()..color = Colors.white.withValues(alpha: 0.55),
-        );
-      case TorenType.gif:
-        canvas.drawCircle(Offset(px, py), cw * 0.09, Paint()..color = const Color(0xFF8BC34A));
-        canvas.drawCircle(
-          Offset(px - cw * 0.03, py - cw * 0.03),
-          cw * 0.03,
-          Paint()..color = Colors.white.withValues(alpha: 0.8),
-        );
-      case TorenType.bliksem:
-        final zigzag = Path()
-          ..moveTo(sx, sy)
-          ..lineTo(sx + (px - sx) * 0.3, sy + (py - sy) * 0.3 - cw * 0.08)
-          ..lineTo(sx + (px - sx) * 0.6, sy + (py - sy) * 0.6 + cw * 0.08)
-          ..lineTo(px, py);
-        canvas.drawPath(
-          zigzag,
-          Paint()
-            ..color = Colors.yellowAccent
-            ..strokeWidth = cw * 0.05
-            ..style = PaintingStyle.stroke,
-        );
-      default:
-        canvas.drawLine(
-          Offset(sx, sy),
-          Offset(px, py),
-          Paint()
-            ..color = const Color(0xFFB388FF)
-            ..strokeWidth = cw * 0.04
-            ..strokeCap = StrokeCap.round,
-        );
-        canvas.drawCircle(Offset(px, py), cw * 0.04, Paint()..color = const Color(0xFFB388FF));
+        x += 25;
+      }
     }
   }
 
-  // ---------------- bloon ----------------
-  void _tekenBloon(Canvas canvas, Vijand v, double cw, double ch) {
-    final (px, py) = positieOpPad(state.pad, v.afstand);
-    final cx = px * cw;
-    final cy = py * ch;
-    final st = v.stats;
+  void _tekenTorenSelectie(Canvas canvas) {
+    final torenTypes = TorenType.values;
+    final buttonWidth = 60.0;
+    final buttonHeight = 40.0;
+    final startX = size.x - (torenTypes.length * (buttonWidth + 10)) - 10;
+    final startY = size.y - buttonHeight - 10;
 
-    if (st.stijl == BloonStijl.moab) {
-      _tekenMoab(canvas, v, cx, cy, cw, ch);
+    for (var i = 0; i < torenTypes.length; i++) {
+      final type = torenTypes[i];
+      final x = startX + i * (buttonWidth + 10);
+      final y = startY;
+
+      // Button achtergrond
+      final isGeselecteerd = state.tePlaatsenType == type;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, y, buttonWidth, buttonHeight),
+          Radius.circular(8),
+        ),
+        Paint()
+          ..color = isGeselecteerd ? Colors.blue : Colors.black.withOpacity(0.5),
+      );
+
+      // Toren-sprite
+      final sprite = torenSprites[type];
+      if (sprite != null) {
+        sprite.render(
+          canvas,
+          position: Vector2(x + buttonWidth / 2, y + buttonHeight / 2),
+          size: Vector2(20, 20),
+          overridePaint: Paint()..color = Colors.white,
+        );
+      }
+
+      // Prijs
+      final prijs = TorenStats.van(type, 1).basisKosten;
+      TextPainter(
+        text: TextSpan(
+          text: '€$prijs',
+          style: TextStyle(color: Colors.white, fontSize: 12),
+        ),
+        textDirection: TextDirection.ltr,
+      )
+        ..layout()
+        ..paint(canvas, Offset(x + 5, y + 5));
+    }
+  }
+
+  void _tekenActieButtons(Canvas canvas) {
+    final buttonWidth = 100.0;
+    final buttonHeight = 40.0;
+    final startX = size.x - buttonWidth - 10;
+    final startY = 10.0;
+
+    // Start/Volgende golf
+    if (state.status == GameStatus.pauze) {
+      _tekenButton(
+        canvas,
+        x: startX,
+        y: startY,
+        width: buttonWidth,
+        height: buttonHeight,
+        text: 'Start golf',
+        kleur: Colors.green,
+        onTap: onStartGolf,
+      );
+    } else {
+      _tekenButton(
+        canvas,
+        x: startX,
+        y: startY,
+        width: buttonWidth,
+        height: buttonHeight,
+        text: 'Volgende',
+        kleur: Colors.orange,
+        onTap: () {
+          state.startGolf();
+          speelGeluid('audio/golf_start.wav');
+        },
+      );
+    }
+
+    // Upgrade
+    if (state.geselecteerdeToren != null) {
+      _tekenButton(
+        canvas,
+        x: startX,
+        y: startY + buttonHeight + 10,
+        width: buttonWidth,
+        height: buttonHeight,
+        text: 'Upgrade (€${state.geselecteerdeToren!.stats.upgradeKosten(state.geselecteerdeToren!.level)})',
+        kleur: Colors.blue,
+        onTap: () {
+          onUpgrade();
+          speelGeluid('audio/button_click.wav');
+        },
+      );
+
+      // Verkoop
+      _tekenButton(
+        canvas,
+        x: startX,
+        y: startY + 2 * (buttonHeight + 10),
+        width: buttonWidth,
+        height: buttonHeight,
+        text: 'Verkoop (€${state.geselecteerdeToren!.stats.verkoopPrijs(state.geselecteerdeToren!.level)})',
+        kleur: Colors.red,
+        onTap: () {
+          onVerkoop();
+          speelGeluid('audio/button_click.wav');
+        },
+      );
+    }
+
+    // Terug naar menu
+    _tekenButton(
+      canvas,
+      x: 10,
+      y: size.y - buttonHeight - 10,
+      width: buttonWidth,
+      height: buttonHeight,
+      text: 'Menu',
+      kleur: Colors.grey,
+      onTap: onTerugNaarMenu,
+    );
+
+    // Modifiers aan/uit
+    _tekenButton(
+      canvas,
+      x: 10 + buttonWidth + 10,
+      y: size.y - buttonHeight - 10,
+      width: buttonWidth,
+      height: buttonHeight,
+      text: state.modifiersActief ? 'Modifiers: AAN' : 'Modifiers: UIT',
+      kleur: state.modifiersActief ? Colors.green : Colors.red,
+      onTap: onToggleModifiers,
+    );
+
+    // Geluid aan/uit
+    _tekenButton(
+      canvas,
+      x: 10 + 2 * (buttonWidth + 10),
+      y: size.y - buttonHeight - 10,
+      width: buttonWidth,
+      height: buttonHeight,
+      text: _geluidAan ? 'Geluid: AAN' : 'Geluid: UIT',
+      kleur: _geluidAan ? Colors.green : Colors.red,
+      onTap: () {
+        _geluidAan = !_geluidAan;
+        onToggleGeluid();
+        speelGeluid('audio/button_click.wav');
+      },
+    );
+  }
+
+  void _tekenButton(
+    Canvas canvas,
+    double x,
+    double y,
+    double width,
+    double height,
+    String text,
+    Color kleur,
+    VoidCallback onTap,
+  ) {
+    // Achtergrond
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(x, y, width, height),
+        Radius.circular(8),
+      ),
+      Paint()..color = kleur.withOpacity(0.7),
+    );
+
+    // Tekst
+    TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(color: Colors.white, fontSize: 14),
+      ),
+      textDirection: TextDirection.ltr,
+    )
+      ..layout(maxWidth: width - 10)
+      ..paint(canvas, Offset(x + 5, y + height / 2 - 10));
+  }
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    regeneratieAnimatie.update(dt);
+    explosieAnimatie.update(dt);
+  }
+
+  void dispose() {
+    _audioPlayer.dispose();
+  }
+    final pos = info.eventPosition.game;
+    final x = pos.x;
+    final y = pos.y;
+
+    // Check of een toren geselecteerd is
+    for (final t in state.torens) {
+      final afstand = math.sqrt(math.pow(t.x - x, 2) + math.pow(t.y - y, 2));
+      if (afstand <= 0.5) {
+        state.geselecteerdeToren = t;
+        return;
+      }
+    }
+
+    // Check of een toren-type geselecteerd is
+    final torenTypes = TorenType.values;
+    final buttonWidth = 60.0;
+    final buttonHeight = 40.0;
+    final startX = size.x - (torenTypes.length * (buttonWidth + 10)) - 10;
+    final startY = size.y - buttonHeight - 10;
+
+    for (var i = 0; i < torenTypes.length; i++) {
+      final type = torenTypes[i];
+      final bx = startX + i * (buttonWidth + 10);
+      final by = startY;
+      if (x >= bx && x <= bx + buttonWidth && y >= by && y <= by + buttonHeight) {
+        onTorenGeselecteerd(type);
+        speelGeluid('audio/button_click.wav');
+        return;
+      }
+    }
+
+    // Check of een actie-button aangeklikt is
+    final buttonWidthActie = 100.0;
+    final buttonHeightActie = 40.0;
+    final startXActie = size.x - buttonWidthActie - 10;
+
+    // Start/Volgende golf
+    if (x >= startXActie && x <= startXActie + buttonWidthActie &&
+        y >= 10 && y <= 10 + buttonHeightActie) {
+      if (state.status == GameStatus.pauze) {
+        onStartGolf();
+      } else {
+        state.startGolf();
+      }
+      speelGeluid('audio/golf_start.wav');
       return;
     }
 
-    // Grondschaduw.
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(cx, cy + ch * 0.16),
-        width: cw * 0.42,
-        height: ch * 0.16,
-      ),
-      Paint()..color = Colors.black.withValues(alpha: 0.3),
-    );
+    // Upgrade
+    if (state.geselecteerdeToren != null) {
+      if (x >= startXActie && x <= startXActie + buttonWidthActie &&
+          y >= 10 + buttonHeightActie + 10 &&
+          y <= 10 + 2 * buttonHeightActie + 10) {
+        onUpgrade();
+        speelGeluid('audio/button_click.wav');
+        return;
+      }
 
-    // Hoppeltje.
-    final hop = math.sin(v.fase * math.pi).abs() * ch * 0.06;
-    final cy2 = cy - hop;
-
-    final hoofdR = cw *
-        switch (st.stijl) {
-          BloonStijl.regenboog || BloonStijl.zebra => 0.3,
-          _ => 0.26,
-        };
-
-    // Gif-bellen.
-    if (v.gifTijd > 0) {
-      for (var i = 0; i < 2; i++) {
-        final bubbelH = (v.fase * 0.25 + i * 0.5) % 1.0;
-        canvas.drawCircle(
-          Offset(cx + (i == 0 ? -hoofdR * 0.5 : hoofdR * 0.4),
-              cy2 - bubbelH * hoofdR * 1.6),
-          2.0 + i,
-          Paint()..color = const Color(0xFF8BC34A).withValues(alpha: 0.6 - bubbelH * 0.4),
-        );
+      // Verkoop
+      if (x >= startXActie && x <= startXActie + buttonWidthActie &&
+          y >= 10 + 2 * (buttonHeightActie + 10) &&
+          y <= 10 + 3 * buttonHeightActie + 20) {
+        onVerkoop();
+        speelGeluid('audio/button_click.wav');
+        return;
       }
     }
 
-    // Ijs-halo.
-    if (v.vertragingTijd > 0) {
-      for (var i = 0; i < 3; i++) {
-        canvas.drawCircle(
-          Offset(cx, cy2),
-          hoofdR * (1.3 + i * 0.25),
-          Paint()..color = Colors.cyan.withValues(alpha: 0.16 - i * 0.04),
-        );
-      }
+    // Terug naar menu
+    if (x >= 10 && x <= 10 + buttonWidthActie &&
+        y >= size.y - buttonHeightActie - 10 &&
+        y <= size.y - 10) {
+      onTerugNaarMenu();
+      speelGeluid('audio/button_click.wav');
+      return;
     }
 
-    // Ballon-lichaam per stijl.
-    if (st.stijl == BloonStijl.regenboog) {
-      // Concentrische regenboog-ringen.
-      var idx = 0;
-      for (var i = _regenboogKleuren.length - 1; i >= 0; i--) {
-        idx++;
-        canvas.drawCircle(
-          Offset(cx, cy2),
-          hoofdR * (idx / _regenboogKleuren.length),
-          Paint()..color = _regenboogKleuren[i],
-        );
-      }
-      canvas.drawCircle(
-        Offset(cx, cy2),
-        hoofdR,
-        Paint()
-          ..color = Colors.black.withValues(alpha: 0.25)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.4,
-      );
-    } else if (st.stijl == BloonStijl.zebra) {
-      canvas.drawCircle(Offset(cx, cy2), hoofdR, Paint()..color = const Color(0xFF212121));
-      canvas.save();
-      canvas.clipPath(Path()
-        ..addOval(Rect.fromCircle(center: Offset(cx, cy2), radius: hoofdR)));
-      final wit = Paint()..color = Colors.white;
-      for (var i = -1; i <= 1; i++) {
-        canvas.drawRect(
-          Rect.fromLTWH(cx - hoofdR + (i + 1.5) * hoofdR * 0.66, cy2 - hoofdR,
-              hoofdR * 0.3, hoofdR * 2),
-          wit,
-        );
-      }
-      canvas.restore();
-    } else {
-      canvas.drawCircle(Offset(cx, cy2), hoofdR, Paint()..color = st.kleur);
-      canvas.drawCircle(
-        Offset(cx, cy2),
-        hoofdR,
-        Paint()
-          ..color = Colors.black.withValues(alpha: 0.25)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5,
-      );
-      canvas.drawCircle(
-        Offset(cx - hoofdR * 0.32, cy2 - hoofdR * 0.34),
-        hoofdR * 0.22,
-        Paint()..color = Colors.white.withValues(alpha: 0.45),
-      );
+    // Modifiers aan/uit
+    if (x >= 10 + buttonWidthActie + 10 &&
+        x <= 10 + 2 * buttonWidthActie + 10 &&
+        y >= size.y - buttonHeightActie - 10 &&
+        y <= size.y - 10) {
+      onToggleModifiers();
+      speelGeluid('audio/button_click.wav');
+      return;
     }
 
-    // Keramiek: barstjes bij HP-verlies.
-    if (v.type == BloonType.keramiek) {
-      final frac = (v.hp / v.hpMax).clamp(0.0, 1.0);
-      if (frac < 0.99) {
-        final barst = Paint()
-          ..color = Colors.white70
-          ..strokeWidth = 1.3
-          ..style = PaintingStyle.stroke;
-        canvas.drawLine(Offset(cx - hoofdR * 0.5, cy2 - hoofdR * 0.3),
-            Offset(cx - hoofdR * 0.1, cy2 + hoofdR * 0.1), barst);
-        if (frac < 0.6) {
-          canvas.drawLine(Offset(cx + hoofdR * 0.2, cy2 - hoofdR * 0.5),
-              Offset(cx + hoofdR * 0.55, cy2 + hoofdR * 0.05), barst);
-        }
-        if (frac < 0.3) {
-          canvas.drawLine(Offset(cx - hoofdR * 0.3, cy2 + hoofdR * 0.4),
-              Offset(cx + hoofdR * 0.3, cy2 + hoofdR * 0.55), barst);
-        }
-      }
+    // Geluid aan/uit
+    if (x >= 10 + 2 * (buttonWidthActie + 10) &&
+        x <= 10 + 3 * buttonWidthActie + 20 &&
+        y >= size.y - buttonHeightActie - 10 &&
+        y <= size.y - 10) {
+      _geluidAan = !_geluidAan;
+      onToggleGeluid();
+      speelGeluid('audio/button_click.wav');
+      return;
     }
 
-    // Modifier-ringen (YouTD2-geïnspireerd): elke golf-eigenschap heeft een
-    // eigen kleur, zodat je in één oogopslag ziet wat er op deze golf zit.
-    if (v.modifiers.isNotEmpty) {
-      _tekenModifierRingen(canvas, v, cx, cy2, hoofdR);
-    }
-
-    // HP-balkje alleen bij meerlagige bloons.
-    if (v.hpMax > 1) {
-      final hpFrac = (v.hp / v.hpMax).clamp(0.0, 1.0);
-      final balkBreedte = hoofdR * 2.2;
-      final balkY = cy2 - hoofdR - ch * 0.14;
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(center: Offset(cx, balkY), width: balkBreedte, height: 4),
-          const Radius.circular(2),
-        ),
-        Paint()..color = Colors.black.withValues(alpha: 0.55),
-      );
-      final hpKleur =
-          hpFrac > 0.5 ? Colors.green : (hpFrac > 0.25 ? Colors.orange : Colors.red);
-      if (hpFrac > 0) {
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromCenter(
-              center: Offset(cx - balkBreedte / 2 + balkBreedte * hpFrac / 2, balkY),
-              width: (balkBreedte - 1) * hpFrac,
-              height: 3,
-            ),
-            const Radius.circular(1.5),
-          ),
-          Paint()..color = hpKleur,
-        );
-      }
+    // Plaats toren (als er geld is en het geen pad-cel is)
+    if (state.tePlaatsenType != null && state.geld >= TorenStats.van(state.tePlaatsenType!, 1).basisKosten) {
+      state.plaatsToren(x, y);
+      speelGeluid('audio/button_click.wav');
     }
   }
-
-  /// Golf-modifier-ringen: één gekleurde ring per eigenschap, net buiten de
-  /// bloon. Kleur volgt GolfModifierInfo.kleurArgb (zie game_config.dart).
-  void _tekenModifierRingen(
-      Canvas canvas, Vijand v, double cx, double cy, double hoofdR) {
-    var ring = 0;
-    for (final m in v.modifiers) {
-      final kleur = Color(m.kleurArgb);
-      final straal = hoofdR * (1.25 + ring * 0.22);
-      canvas.drawCircle(
-        Offset(cx, cy),
-        straal,
-        Paint()
-          ..color = kleur.withValues(alpha: 0.85)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.8,
-      );
-      // Regen: groen pulserende gloed, zodat herstel zichtbaar is.
-      if (m == GolfModifier.regenererend && v.hp < v.hpMax) {
-        canvas.drawCircle(
-          Offset(cx, cy),
-          straal + 1.5,
-          Paint()..color = kleur.withValues(alpha: 0.25),
-        );
-      }
-      ring++;
-    }
-  }
-
-  void _tekenMoab(Canvas canvas, Vijand v, double cx, double cy, double cw, double ch) {
-    // MOAB: blimp-lichaam met vinnen, rood streep en HP-balk.
-    final breedte = cw * 1.5;
-    final hoogte = ch * 0.75;
-    final hoek = _moabRichting(state.pad, v.afstand);
-
-    canvas.save();
-    canvas.translate(cx, cy);
-    canvas.rotate(hoek);
-
-    canvas.drawOval(
-      Rect.fromCenter(
-          center: Offset(0, hoogte * 0.75), width: breedte, height: hoogte * 0.4),
-      Paint()..color = Colors.black.withValues(alpha: 0.25),
-    );
-
-    final romp = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: Offset(0, 0), width: breedte, height: hoogte),
-      Radius.circular(hoogte / 2),
-    );
-    canvas.drawRRect(romp, Paint()..color = const Color(0xFF37474F));
-    canvas.drawRRect(romp.deflate(2.5), Paint()..color = const Color(0xFF546E7A));
-    canvas.drawRect(
-      Rect.fromCenter(center: Offset(0, 0), width: breedte - 12, height: hoogte * 0.22),
-      Paint()..color = const Color(0xFFB71C1C),
-    );
-    canvas.drawCircle(Offset(breedte / 2, 0), hoogte * 0.22, Paint()..color = const Color(0xFF263238));
-    for (final sgn in [-1.0, 1.0]) {
-      canvas.drawPath(
-        Path()
-          ..moveTo(-breedte / 2 + 4, 0)
-          ..lineTo(-breedte / 2 - 8, sgn * hoogte * 0.55)
-          ..lineTo(-breedte / 2 + 10, sgn * hoogte * 0.18)
-          ..close(),
-        Paint()..color = const Color(0xFF263238),
-      );
-    }
-
-    // HP-balk.
-    final hpFrac = (v.hp / v.hpMax).clamp(0.0, 1.0);
-    final balkBreedte = breedte;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCenter(center: Offset(0, -hoogte * 0.9), width: balkBreedte, height: 6),
-        const Radius.circular(3),
-      ),
-      Paint()..color = Colors.black.withValues(alpha: 0.55),
-    );
-    final hpKleur =
-        hpFrac > 0.5 ? Colors.green : (hpFrac > 0.25 ? Colors.orange : Colors.red);
-    if (hpFrac > 0) {
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(
-            center: Offset(-balkBreedte / 2 + balkBreedte * hpFrac / 2, -hoogte * 0.9),
-            width: (balkBreedte - 1.5) * hpFrac,
-            height: 4.6,
-          ),
-          const Radius.circular(2.3),
-        ),
-        Paint()..color = hpKleur,
-      );
-    }
-
-    // Golf-modifier-ring om de MOAB (zelfde kleuren als gewone bloons).
-    if (v.modifiers.isNotEmpty) {
-      var ring = 0;
-      for (final m in v.modifiers) {
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromCenter(
-                center: Offset.zero,
-                width: breedte + 12 + ring * 10,
-                height: hoogte + 12 + ring * 10),
-            Radius.circular((hoogte + 12 + ring * 10) / 2),
-          ),
-          Paint()
-            ..color = Color(m.kleurArgb).withValues(alpha: 0.85)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2.2,
-        );
-        ring++;
-      }
-    }
-
-    canvas.restore();
-  }
-
-  double _moabRichting(List<(double, double)> pad, double afstand) {
-    const epsilon = 0.1;
-    final (x1, y1) = positieOpPad(pad, math.max(0.0, afstand - epsilon));
-    final (x2, y2) = positieOpPad(pad, afstand + epsilon);
-    return math.atan2(y2 - y1, x2 - x1);
-  }
-
-  void _tekst(Canvas canvas, String label, double cx, double cy, double size) {
-    final tp = TextPainter(
-      text: TextSpan(text: label, style: TextStyle(fontSize: size)),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    tp.paint(canvas, Offset(cx - tp.width / 2, cy - tp.height / 2));
-  }
-
-  @override
-  bool shouldRepaint(covariant GamePainter oldDelegate) => true;
 }

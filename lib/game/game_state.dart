@@ -65,14 +65,14 @@ class GameState {
     for (final t in torens) {
       if ((t.x - cx).abs() < 0.9 && (t.y - cy).abs() < 0.9) return false;
     }
-    return geld >= TorenStats.van(tePlaatsenType!, 1).basisKosten;
+    return geld >= GameBalance.van(tePlaatsenType!, 1).basisKosten;
   }
 
   void plaatsToren(double cx, double cy) {
     final type = tePlaatsenType;
     if (type == null) return;
     if (!kanPlaatsen(cx, cy)) {
-      toast = geld < TorenStats.van(type, 1).basisKosten
+      toast = geld < GameBalance.van(type, 1).basisKosten
           ? 'Te duur!'
           : 'Kan hier niet';
       return;
@@ -143,7 +143,7 @@ class GameState {
     final golfMods = _huidigeGolf!.modifiers;
     while (_spawnIndex < spawns.length && spawns[_spawnIndex].$2 <= _golfTijd) {
       final (type, _) = spawns[_spawnIndex];
-      final stats0 = BloonStats.van(type);
+      final stats0 = BloonStats.alle[type]!;
       final v = Vijand(type, stats0, 0.0, modifiers: golfMods);
       if (type == BloonType.moab) {
         // MOAB-HP-schaling bovenop de Sterk-modifier (1.25×, gelijk aan Vijand).
@@ -178,15 +178,15 @@ class GameState {
       t.vuurCooldown -= dt;
       if (t.vuurCooldown <= 0) {
         final stats = t.stats;
-        if (stats.spijkers > 0) {
+        if (stats.snelheid < 0.3) {
           // Tack: N spijkers in een cirkel, doel-loos.
-          for (var i = 0; i < stats.spijkers; i++) {
-            final hoek = i * 2 * math.pi / stats.spijkers + t.animTijd * 0.3;
+          for (var i = 0; i < 8; i++) {
+            final hoek = i * 2 * math.pi / 8 + t.animTijd * 0.3;
             projectielen
                 .add(_bouwProjectiel(t, stats, richting: hoek, doel: null));
           }
           t.schietFlits = 1;
-          t.vuurCooldown = stats.vuurInterval;
+          t.vuurCooldown = stats.snelheid;
         } else {
           final doel = _zoekDoel(t, geclaimd);
           if (doel != null) {
@@ -199,7 +199,7 @@ class GameState {
             t.loopRichting = math.atan2(vy - t.y, vx - t.x);
             t.schietFlits = 1;
             projectielen.add(_bouwProjectiel(t, stats, richting: 0, doel: doel));
-            t.vuurCooldown = stats.vuurInterval;
+            t.vuurCooldown = stats.snelheid;
           }
         }
       }
@@ -241,7 +241,7 @@ class GameState {
       for (var i = 0; i < v.stats.childAantal; i++) {
         nieuweVijanden.add(Vijand(
           childType,
-          BloonStats.van(childType),
+          BloonStats.alle[childType]!,
           v.afstand - i * 0.18,
           modifiers: v.modifiers, // kinderen erven de golf-eigenschappen
         ));
@@ -286,10 +286,10 @@ class GameState {
       type: t.type,
       doel: doel,
       schade: stats.schade,
-      snelheid: stats.projectileSnelheid,
+      snelheid: stats.snelheid * 3,
       vertragingPerTref: stats.vertragingPerTref,
       splashRadius: stats.splashRadius,
-      maxAfstand: stats.maxProjectielAfstand,
+      maxAfstand: stats.bereik * 1.2,
       richting: richting,
       pierce: pierce,
       pad: pad,

@@ -156,9 +156,9 @@ class Toren {
   double animTijd = 0;
 
   Toren(this.type, this.x, this.y)
-      : totaalGeinvesteerd = TorenStats.van(type, 1).basisKosten;
+      : totaalGeinvesteerd = GameBalance.van(type, 1).basisKosten;
 
-  TorenStats get stats => TorenStats.van(type, level);
+  TorenStats get stats => GameBalance.van(type, level);
 
   void upgrade() {
     if (level >= GameBalance.maxTorenLevel) return;
